@@ -710,6 +710,13 @@ function switch_to_tab(session_id) {
     update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
     if (session.is_connected) {
       document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+      document.getElementById('connect-btn').disabled = true;
+      document.getElementById('disconnect-btn').disabled = false;
+      document.getElementById('vnc-button').disabled = false;
+    } else {
+      document.getElementById('connect-btn').disabled = false;
+      document.getElementById('disconnect-btn').disabled = true;
+      document.getElementById('vnc-button').disabled = true;
     }
   }
 
@@ -766,6 +773,7 @@ async function connectToSession(session_id = null) {
         document.getElementById('session-id').textContent = `Session: ${sid.substring(0, 8)}...`;
         document.getElementById('connect-btn').disabled = true;
         document.getElementById('disconnect-btn').disabled = false;
+        document.getElementById('vnc-button').disabled = false;
         set_message('Connected. Type to interact.');
         if (session.term) session.term.focus();
       }
@@ -809,6 +817,9 @@ async function connectToSession(session_id = null) {
       update_status('disconnected', false);
       if (active_session_id === sid) {
         document.getElementById('session-info').style.display = 'none';
+        document.getElementById('connect-btn').disabled = false;
+        document.getElementById('disconnect-btn').disabled = true;
+        document.getElementById('vnc-button').disabled = true;
       }
       document.getElementById('tab-' + sid)?.classList.add('disconnected');
       set_message('Disconnected from session');
