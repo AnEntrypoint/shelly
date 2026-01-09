@@ -78,6 +78,7 @@ class ShellSession {
     this.created_at = Date.now();
     this.clients_connected = new Set();
     this.shell_provider_id = null;
+    this.has_active_provider = false;
     this.is_active = true;
     this.viewport_buffer = [];
     this.viewport_cols = 120;
@@ -234,11 +235,12 @@ app.post('/api/sessions/by-password', (req, res) => {
 
   const sessions_list = session_ids
     .map(id => sessions.get(id))
-    .filter(s => s && s.is_active)
+    .filter(s => s && s.is_active && s.has_active_provider)
     .map(s => ({
       id: s.id,
       token: s.token,
       is_active: s.is_active,
+      has_active_provider: s.has_active_provider,
       clients: s.clients_connected.size,
       created_at: s.created_at,
       uptime_ms: Date.now() - s.created_at
@@ -441,6 +443,7 @@ wss.on('connection', (ws, req) => {
 
     if (client_type === 'provider') {
       session.shell_provider_id = client_id;
+      session.has_active_provider = true;
       log_state('shell_provider_connected', null, client_id, 'provider_connected');
       session.broadcast_log_event('shell_provider_connected', 'shell_provider_id', client_id);
     } else {
@@ -496,6 +499,7 @@ wss.on('connection', (ws, req) => {
       session.clients_connected.delete(client_id);
       if (session.shell_provider_id === client_id) {
         session.shell_provider_id = null;
+        session.has_active_provider = false;
         log_state('shell_provider_disconnected', null, client_id, 'provider_closed');
         session.broadcast_log_event('shell_provider_disconnected', 'shell_provider_id', null);
         session.close();
