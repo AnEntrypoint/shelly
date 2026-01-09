@@ -14,12 +14,13 @@ class VncEncoder {
       return this.ffmpeg_process.stdout;
     }
 
-    const vnc_url = `vnc://${vnc_host}:${vnc_port}`;
+    // Use x11grab to capture Xvfb display :99 instead of VNC (VNC input format not available in FFmpeg)
+    const display = process.env.DISPLAY || ':99';
     const ffmpeg_args = [
-      '-f', 'vnc',
+      '-f', 'x11grab',
       '-framerate', framerate.toString(),
       '-video_size', `${width}x${height}`,
-      '-i', vnc_url,
+      '-i', `${display}.0`,
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '28',
@@ -30,7 +31,8 @@ class VncEncoder {
     ];
 
     this.ffmpeg_process = spawn('ffmpeg', ffmpeg_args, {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, DISPLAY: display }
     });
 
     if (!this.ffmpeg_process.stdout) {
@@ -38,7 +40,7 @@ class VncEncoder {
     }
 
     this.is_encoding = true;
-    this.log_state('h264_encoder_started', null, `${vnc_url}@${width}x${height}@${framerate}fps with MP4 fragmentation`, 'encoder_init');
+    this.log_state('h264_encoder_started', null, `X11 display ${display}@${width}x${height}@${framerate}fps with MP4 fragmentation`, 'encoder_init');
     return this.ffmpeg_process.stdout;
   }
 
