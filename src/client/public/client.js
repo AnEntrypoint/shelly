@@ -79,11 +79,19 @@ function init_h264_video_stream() {
   const video_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}&fps=5`;
 
   try {
+    console.log('H.264 Stream: Checking decoder availability');
+    console.log('  window.H264Decoder:', typeof window.H264Decoder);
+
+    if (!window.H264Decoder) {
+      console.warn('H.264 decoder not loaded. Library may be blocked or CDN may be unreachable.');
+    }
+
     h264_video_ws = new WebSocket(video_url);
     h264_video_ws.binaryType = 'arraybuffer';
 
     h264_video_ws.onopen = () => {
       log_session_state('h264_stream_opened', { url: video_url });
+      console.log('H.264 Stream: WebSocket connected, waiting for frames');
     };
 
     h264_video_ws.onmessage = (event) => {
@@ -94,6 +102,7 @@ function init_h264_video_stream() {
           const msg = packer.unpack(new Uint8Array(event.data));
 
           if (msg.type === 'ready' && msg.stream_type === 'h264_video') {
+            console.log('H.264 Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
             log_session_state('h264_stream_ready', {
               width: msg.width,
               height: msg.height,
@@ -101,26 +110,32 @@ function init_h264_video_stream() {
             });
             init_h264_video_player(msg.width, msg.height);
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            const chunk = Buffer.from(msg.data, 'base64');
             if (h264_decoder) {
+              const chunk = Buffer.from(msg.data, 'base64');
               h264_decoder.decode(chunk);
+            } else {
+              console.warn('H.264 Stream: Received frame but decoder not initialized');
             }
           }
         }
       } catch (err) {
+        console.error('H.264 Stream: Message processing error', err);
         log_session_state('h264_message_error', { error: err.message });
       }
     };
 
     h264_video_ws.onclose = () => {
+      console.log('H.264 Stream: WebSocket closed');
       log_session_state('h264_stream_closed', {});
       close_h264_video_stream();
     };
 
     h264_video_ws.onerror = (err) => {
+      console.error('H.264 Stream: WebSocket error', err);
       log_session_state('h264_stream_error', { error: err.message });
     };
   } catch (err) {
+    console.error('H.264 Stream: Initialization error', err);
     log_session_state('h264_stream_init_error', { error: err.message });
     alert(`H.264 stream error: ${err.message}`);
   }
@@ -137,15 +152,15 @@ function init_h264_video_player(width, height) {
     video_container.style.height = '100%';
     viewer.appendChild(video_container);
 
-    const video_elem = document.createElement('video');
-    video_elem.id = 'h264-video-player';
-    video_elem.style.width = '100%';
-    video_elem.style.height = '100%';
-    video_elem.style.backgroundColor = '#000';
-    video_elem.style.display = 'block';
-    video_elem.autoplay = true;
-    video_elem.muted = true;
-    video_container.appendChild(video_elem);
+    const canvas = document.createElement('canvas');
+    canvas.id = 'h264-canvas';
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.display = 'block';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.backgroundColor = '#000';
+    video_container.appendChild(canvas);
 
     const overlay = document.createElement('div');
     overlay.id = 'h264-overlay';
@@ -164,35 +179,35 @@ function init_h264_video_player(width, height) {
     overlay.style.color = 'rgba(255, 255, 255, 0.3)';
     overlay.style.fontSize = '12px';
     overlay.style.padding = '10px';
-    overlay.style.pointerEvents = 'auto';
+    overlay.style.pointerEvents = 'none';
     video_container.appendChild(overlay);
 
     if (window.H264Decoder) {
       h264_decoder = new window.H264Decoder();
-      h264_decoder.onPictureDecoded = (buffer, width, height) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        const imageData = ctx.createImageData(width, height);
-        imageData.data.set(buffer);
-        ctx.putImageData(imageData, 0, 0);
+      h264_decoder.onPictureDecoded = (buffer, dec_width, dec_height) => {
+        try {
+          const canvas_elem = document.getElementById('h264-canvas');
+          if (!canvas_elem) return;
 
-        const video = document.getElementById('h264-video-player');
-        if (video) {
-          video.style.backgroundImage = `url(${canvas.toDataURL()})`;
-          video.style.backgroundSize = 'contain';
-          video.style.backgroundPosition = 'center';
+          canvas_elem.width = dec_width;
+          canvas_elem.height = dec_height;
+          const ctx = canvas_elem.getContext('2d');
+          const imageData = ctx.createImageData(dec_width, dec_height);
+          imageData.data.set(buffer);
+          ctx.putImageData(imageData, 0, 0);
+        } catch (err) {
+          log_session_state('h264_frame_render_error', { error: err.message });
         }
       };
 
       log_session_state('h264_decoder_initialized', { width, height });
     } else {
-      log_session_state('h264_decoder_unavailable', { info: 'Using fallback display' });
+      log_session_state('h264_decoder_unavailable', { info: 'H264Decoder library not loaded - check console for script load errors' });
+      viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #f48771; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Decoder Not Available</strong><br/><br/>The h264-asm.js library failed to load.<br/>Check browser console for CDN errors.<br/><br/>Common fixes:<br/>• Check internet connection<br/>• Disable adblockers/script blockers<br/>• Check browser console (F12)</div></div>`;
     }
   } catch (err) {
     log_session_state('h264_player_init_error', { error: err.message });
-    viewer.innerHTML = `<p style="color: #f48771; padding: 20px;">Failed to initialize H.264 player: ${err.message}</p>`;
+    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #f48771; font-family: monospace; padding: 20px;"><div><strong>H.264 Player Initialization Failed</strong><br/><br/>${err.message}</div></div>`;
   }
 }
 
