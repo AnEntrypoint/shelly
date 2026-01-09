@@ -191,6 +191,19 @@ const pack = new Packr();
 
 app.use(express.json());
 
+// Log WebSocket upgrade attempts
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const session_id = url.searchParams.get('session_id');
+  const client_type = url.searchParams.get('type') || 'unknown';
+  log_state('ws_upgrade_attempt', null, { session_id: session_id?.substring(0, 8), client_type, headers: { upgrade: req.headers.upgrade, connection: req.headers.connection } }, 'ws_upgrade_started');
+});
+
+// Log WebSocket connection errors
+wss.on('error', (err) => {
+  log_state('wss_error', null, err.message, 'wss_internal_error');
+});
+
 const public_path = path.resolve(path.join(__dirname, '../client/public'));
 app.use(express.static(public_path));
 
@@ -371,7 +384,7 @@ wss.on('connection', (ws, req) => {
   const endpoint = url.pathname;
   const client_type = url.searchParams.get('type') || 'unknown';
 
-  log_state('ws_connection_received', null, { session_id: session_id?.substring(0, 8), token_len: token?.length || 0, endpoint, client_type, client_id: client_id.substring(0, 8) }, 'ws_handshake_started');
+  log_state('ws_connection_accepted', null, { session_id: session_id?.substring(0, 8), token_len: token?.length || 0, endpoint, client_type, client_id: client_id.substring(0, 8), readyState: ws.readyState }, 'ws_handshake_complete');
 
   const session = sessions.get(session_id);
   if (!session) {
