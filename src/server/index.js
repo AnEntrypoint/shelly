@@ -244,6 +244,12 @@ app.get('/', (req, res) => {
 app.post('/api/session', (req, res) => {
   const password = req.body?.password;
 
+  log_state('api_session_called', null, {
+    has_password: !!password,
+    password_len: password?.length || 0,
+    total_sessions_before: sessions.size
+  }, 'api_session_request');
+
   if (!password) {
     return res.status(400).json({ error: 'password_required' });
   }
@@ -251,6 +257,12 @@ app.post('/api/session', (req, res) => {
   const session_id = uuid();
   const session = new ShellSession(session_id, password);
   sessions.set(session_id, session);
+
+  log_state('api_session_stored', null, {
+    session_id: session_id.substring(0, 8),
+    token_len: session.token.length,
+    total_sessions_after: sessions.size
+  }, 'api_session_stored');
 
   const password_hash = hash_password(password);
   if (!password_groups.has(password_hash)) {
@@ -414,17 +426,36 @@ wss.on('connection', (ws, req) => {
   const endpoint = url.pathname;
   const client_type = url.searchParams.get('type') || 'unknown';
 
-  log_state('ws_connection_accepted', null, { session_id: session_id?.substring(0, 8), token_len: token?.length || 0, endpoint, client_type, client_id: client_id.substring(0, 8), readyState: ws.readyState }, 'ws_handshake_complete');
+  log_state('ws_connection_accepted', null, {
+    session_id: session_id?.substring(0, 8),
+    token_len: token?.length || 0,
+    endpoint,
+    client_type,
+    client_id: client_id.substring(0, 8),
+    readyState: ws.readyState,
+    total_sessions: sessions.size,
+    all_session_ids: Array.from(sessions.keys()).map(id => id.substring(0, 8))
+  }, 'ws_handshake_complete');
 
   const session = sessions.get(session_id);
   if (!session) {
-    log_state('ws_auth_failed', null, { session_id, reason: 'session_not_found', total_sessions: sessions.size }, 'invalid_ws_session');
+    log_state('ws_auth_failed', null, {
+      session_id: session_id?.substring(0, 8),
+      reason: 'session_not_found',
+      total_sessions: sessions.size,
+      all_sessions: Array.from(sessions.keys()).map(id => id.substring(0, 8))
+    }, 'invalid_ws_session');
     ws.close(4001, 'unauthorized');
     return;
   }
 
   if (token !== session.token) {
-    log_state('ws_auth_failed', null, { session_id, token_match: false, provided_len: token?.length || 0, expected_len: session.token?.length || 0 }, 'invalid_ws_token_mismatch');
+    log_state('ws_auth_failed', null, {
+      session_id: session_id?.substring(0, 8),
+      token_match: false,
+      provided_len: token?.length || 0,
+      expected_len: session.token?.length || 0
+    }, 'invalid_ws_token_mismatch');
     ws.close(4001, 'unauthorized');
     return;
   }
