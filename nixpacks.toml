@@ -8,6 +8,4 @@ port = 3000
 [[providers]]
 name = "nodejs"
 match = { files = ["package.json"] }
-
-[providers.nodejs]
 nodeVersion = "22"
