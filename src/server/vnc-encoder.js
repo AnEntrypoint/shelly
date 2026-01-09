@@ -11,11 +11,14 @@ class VncEncoder {
 
   init_display_encoder(vnc_host = 'localhost', vnc_port = 5900, width = 1024, height = 768, framerate = 5) {
     if (this.ffmpeg_process) {
+      this.log_state('h264_encoder_reuse', null, 'process_already_exists', 'encoder_init');
       return this.ffmpeg_process.stdout;
     }
 
     // Use x11grab to capture Xvfb display :99 instead of VNC (VNC input format not available in FFmpeg)
     const display = process.env.DISPLAY || ':99';
+    this.log_state('h264_encoder_init_start', null, `display=${display}`, 'encoder_init');
+
     const ffmpeg_args = [
       '-f', 'x11grab',
       '-framerate', framerate.toString(),
@@ -36,11 +39,23 @@ class VncEncoder {
     });
 
     if (!this.ffmpeg_process.stdout) {
+      this.log_state('h264_encoder_spawn_failed', null, 'no_stdout', 'encoder_init');
       throw new Error('FFmpeg stdout not available');
     }
 
+    this.log_state('h264_ffmpeg_spawned', null, `pid=${this.ffmpeg_process.pid}`, 'encoder_init');
+
+    // Log when FFmpeg starts and stops
+    this.ffmpeg_process.on('error', (err) => {
+      this.log_state('ffmpeg_spawn_error', null, err.message, 'encoder_error');
+    });
+
+    this.ffmpeg_process.on('close', (code) => {
+      this.log_state('ffmpeg_closed_after_init', null, `code=${code}`, 'encoder_close');
+    });
+
     this.is_encoding = true;
-    this.log_state('h264_encoder_started', null, `X11 display ${display}@${width}x${height}@${framerate}fps with MP4 fragmentation`, 'encoder_init');
+    this.log_state('h264_encoder_started', null, `X11 display ${display}@${width}x${height}@${framerate}fps`, 'encoder_init');
     return this.ffmpeg_process.stdout;
   }
 
