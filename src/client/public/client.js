@@ -578,6 +578,22 @@ function init_terminal_for_session(session_id) {
 
     term.loadAddon(fitAddon);
 
+    // Wrap fitAddon.fit() to prevent rendering issues
+    const original_fit = fitAddon.fit.bind(fitAddon);
+    fitAddon.fit = () => {
+      try {
+        const proposed = fitAddon.proposeDimensions();
+        if (!proposed || !term || isNaN(proposed.cols) || isNaN(proposed.rows)) {
+          return;
+        }
+        if (proposed.cols > 0 && proposed.rows > 0) {
+          term.resize(proposed.cols, proposed.rows);
+        }
+      } catch (err) {
+        log_session_state('fitAddon_wrap_error', { session_id, error: err.message });
+      }
+    };
+
     term_elem.setAttribute('autocomplete', 'off');
     term_elem.setAttribute('spellcheck', 'false');
 
@@ -595,10 +611,16 @@ function init_terminal_for_session(session_id) {
       return false;
     });
 
-    // Defer fit() until next animation frame to ensure DOM layout is current
-    requestAnimationFrame(() => {
-      fitAddon.fit();
-    });
+    // Defer fit() until terminal is ready and has dimensions
+    setTimeout(() => {
+      try {
+        if (term_elem.offsetWidth > 0 && term_elem.offsetHeight > 0) {
+          fitAddon.fit();
+        }
+      } catch (err) {
+        log_session_state('fitAddon_fit_error', { session_id, error: err.message });
+      }
+    }, 100);
 
     const session = sessions.get(session_id);
     term.onData((data) => {
@@ -711,15 +733,17 @@ function switch_to_tab(session_id) {
     connectToSession(session_id);
   } else {
     if (session.term && session.fitAddon) {
-      // Use requestAnimationFrame to ensure DOM layout is current before fitting
-      requestAnimationFrame(() => {
+      // Ensure the terminal div is visible before fitting
+      setTimeout(() => {
         try {
-          session.fitAddon.fit();
-          session.term.focus();
+          if (term_div && term_div.offsetWidth > 0 && term_div.offsetHeight > 0) {
+            session.fitAddon.fit();
+            session.term.focus();
+          }
         } catch (err) {
           console.error('Tab switch error:', err);
         }
-      });
+      }, 50);
     }
 
     update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
