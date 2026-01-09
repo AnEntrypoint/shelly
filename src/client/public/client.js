@@ -160,7 +160,8 @@ function init_terminal_for_session(session_id) {
 
     let fitAddon;
     try {
-      fitAddon = new window.FitAddon();
+      const FitAddonClass = window.FitAddon?.FitAddon || window.FitAddon;
+      fitAddon = new FitAddonClass();
     } catch (addon_err) {
       log_session_state('terminal_init_error', { session_id, reason: 'fitaddon_failed', error: addon_err.message });
       return false;
