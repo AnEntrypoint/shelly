@@ -110,9 +110,16 @@ function init_h264_video_stream() {
             });
             init_h264_video_player(msg.width, msg.height);
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            if (h264_decoder) {
-              const chunk = Buffer.from(msg.data, 'base64');
-              h264_decoder.decode(chunk);
+            if (h264_decoder && h264_decoder.sourceBuffer) {
+              try {
+                // Append H.264 chunk to MediaSource SourceBuffer for native decoding
+                const chunk = Buffer.from(msg.data, 'base64');
+                if (h264_decoder.sourceBuffer.updating === false) {
+                  h264_decoder.sourceBuffer.appendBuffer(chunk);
+                }
+              } catch (append_err) {
+                console.warn('H.264 Stream: Failed to append chunk', append_err);
+              }
             } else {
               console.warn('H.264 Stream: Received frame but decoder not initialized');
             }
@@ -150,64 +157,72 @@ function init_h264_video_player(width, height) {
     video_container.style.position = 'relative';
     video_container.style.width = '100%';
     video_container.style.height = '100%';
+    video_container.style.display = 'flex';
+    video_container.style.alignItems = 'center';
+    video_container.style.justifyContent = 'center';
+    video_container.style.backgroundColor = '#000';
     viewer.appendChild(video_container);
 
-    const canvas = document.createElement('canvas');
-    canvas.id = 'h264-canvas';
-    canvas.width = width;
-    canvas.height = height;
-    canvas.style.display = 'block';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.backgroundColor = '#000';
-    video_container.appendChild(canvas);
+    // Use native HTML5 video element with MediaSource API
+    const video = document.createElement('video');
+    video.id = 'h264-video';
+    video.controls = false;
+    video.autoplay = true;
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.objectFit = 'contain';
+    video.style.backgroundColor = '#000';
+    video_container.appendChild(video);
 
-    const overlay = document.createElement('div');
-    overlay.id = 'h264-overlay';
-    overlay.style.position = 'absolute';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.userSelect = 'text';
-    overlay.style.WebkitUserSelect = 'text';
-    overlay.style.MozUserSelect = 'text';
-    overlay.style.msUserSelect = 'text';
-    overlay.style.cursor = 'default';
-    overlay.style.zIndex = '1';
-    overlay.textContent = 'H.264 video stream active - select text to copy';
-    overlay.style.color = 'rgba(255, 255, 255, 0.3)';
-    overlay.style.fontSize = '12px';
-    overlay.style.padding = '10px';
-    overlay.style.pointerEvents = 'none';
-    video_container.appendChild(overlay);
+    // Initialize MediaSource API for native H.264 streaming
+    const mediaSource = new MediaSource();
+    video.src = URL.createObjectURL(mediaSource);
 
-    if (window.H264Decoder) {
-      h264_decoder = new window.H264Decoder();
-      h264_decoder.onPictureDecoded = (buffer, dec_width, dec_height) => {
-        try {
-          const canvas_elem = document.getElementById('h264-canvas');
-          if (!canvas_elem) return;
+    mediaSource.addEventListener('sourceopen', () => {
+      try {
+        // H.264/AVC codec MIME type - supported by all modern browsers
+        // Try standard AVC profile, fallback to more generic types
+        let mimeType = 'video/mp4; codecs="avc1.42E01E"';
+        let sourceBuffer = null;
 
-          canvas_elem.width = dec_width;
-          canvas_elem.height = dec_height;
-          const ctx = canvas_elem.getContext('2d');
-          const imageData = ctx.createImageData(dec_width, dec_height);
-          imageData.data.set(buffer);
-          ctx.putImageData(imageData, 0, 0);
-        } catch (err) {
-          log_session_state('h264_frame_render_error', { error: err.message });
+        if (MediaSource.isTypeSupported(mimeType)) {
+          sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+          console.log('H.264 Video: Using standard AVC1 codec');
+        } else {
+          // Fallback to simpler codec string
+          mimeType = 'video/mp4; codecs="avc1"';
+          if (MediaSource.isTypeSupported(mimeType)) {
+            sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            console.log('H.264 Video: Using generic AVC1 codec');
+          } else {
+            throw new Error(`H.264 MIME type not supported: ${mimeType}`);
+          }
         }
-      };
 
-      log_session_state('h264_decoder_initialized', { width, height });
-    } else {
-      log_session_state('h264_decoder_unavailable', { info: 'H264Decoder library not loaded - check console for script load errors' });
-      viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #f48771; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Decoder Not Available</strong><br/><br/>The h264-asm.js library failed to load.<br/>Check browser console for CDN errors.<br/><br/>Common fixes:<br/>• Check internet connection<br/>• Disable adblockers/script blockers<br/>• Check browser console (F12)</div></div>`;
-    }
+        h264_decoder = { sourceBuffer, mediaSource, video };
+
+        console.log('H.264 Video: Native MediaSource initialized with fragmented MP4');
+        log_session_state('h264_decoder_initialized', {
+          type: 'native_mediasource',
+          width,
+          height,
+          mimeType
+        });
+      } catch (err) {
+        console.error('H.264 Video: MediaSource initialization failed', err);
+        log_session_state('h264_mediasource_error', { error: err.message });
+      }
+    }, { once: true });
+
+    mediaSource.addEventListener('error', (err) => {
+      console.error('H.264 Video: MediaSource error', err);
+      log_session_state('h264_mediasource_error', { error: err.message });
+    });
+
   } catch (err) {
+    console.error('H.264 Video: Player initialization failed', err);
     log_session_state('h264_player_init_error', { error: err.message });
-    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #f48771; font-family: monospace; padding: 20px;"><div><strong>H.264 Player Initialization Failed</strong><br/><br/>${err.message}</div></div>`;
+    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #4fc3f7; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Video Stream</strong><br/><br/>Initializing native browser decoder...<br/><br/>${err.message}</div></div>`;
   }
 }
 
@@ -217,6 +232,16 @@ function close_h264_video_stream() {
     h264_video_ws = null;
   }
   if (h264_decoder) {
+    if (h264_decoder.mediaSource && h264_decoder.mediaSource.readyState === 'open') {
+      try {
+        h264_decoder.mediaSource.endOfStream();
+      } catch (err) {
+        // Silently ignore if already ended
+      }
+    }
+    if (h264_decoder.video && h264_decoder.video.src) {
+      URL.revokeObjectURL(h264_decoder.video.src);
+    }
     h264_decoder = null;
   }
   const viewer = document.getElementById('vnc-viewer');

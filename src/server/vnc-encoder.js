@@ -23,7 +23,9 @@ class VncEncoder {
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '28',
-      '-f', 'h264',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov',
+      '-frag_duration', '500',
       'pipe:1'
     ];
 
@@ -36,7 +38,7 @@ class VncEncoder {
     }
 
     this.is_encoding = true;
-    this.log_state('h264_encoder_started', null, `${vnc_url}@${width}x${height}@${framerate}fps`, 'encoder_init');
+    this.log_state('h264_encoder_started', null, `${vnc_url}@${width}x${height}@${framerate}fps with MP4 fragmentation`, 'encoder_init');
     return this.ffmpeg_process.stdout;
   }
 
