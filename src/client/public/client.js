@@ -96,6 +96,22 @@ async function handle_password_submit() {
   }
 }
 
+function remove_session_tab(session_id) {
+  const tab = document.getElementById(`tab-${session_id}`);
+  const terminal = document.getElementById(`terminal-${session_id}`);
+
+  if (tab) tab.remove();
+  if (terminal) terminal.remove();
+
+  const session = sessions.get(session_id);
+  if (session && session.ws) {
+    session.ws.close();
+  }
+
+  sessions.delete(session_id);
+  log_session_state('session_removed', { session_id });
+}
+
 function init_terminal_for_session(session_id) {
   const term_elem = document.getElementById(`terminal-${session_id}`);
   if (!term_elem) {
@@ -103,85 +119,97 @@ function init_terminal_for_session(session_id) {
     return false;
   }
 
-  const is_mobile = window.innerWidth < 768;
-  const font_size = is_mobile ? 11 : 13;
-  const theme = {
-    background: '#1e1e1e',
-    foreground: '#d4d4d4',
-    cursor: '#d4d4d4',
-    cursorAccent: '#1e1e1e',
-    selection: 'rgba(79, 195, 247, 0.3)',
-    black: '#1e1e1e',
-    brightBlack: '#858585',
-    red: '#f48771',
-    brightRed: '#f48771',
-    green: '#4ec9b0',
-    brightGreen: '#4ec9b0',
-    yellow: '#dcdcaa',
-    brightYellow: '#dcdcaa',
-    blue: '#569cd6',
-    brightBlue: '#569cd6',
-    magenta: '#c586c0',
-    brightMagenta: '#c586c0',
-    cyan: '#4fc3f7',
-    brightCyan: '#4fc3f7',
-    white: '#d4d4d4',
-    brightWhite: '#d4d4d4'
-  };
+  try {
+    const is_mobile = window.innerWidth < 768;
+    const font_size = is_mobile ? 11 : 13;
+    const theme = {
+      background: '#1e1e1e',
+      foreground: '#d4d4d4',
+      cursor: '#d4d4d4',
+      cursorAccent: '#1e1e1e',
+      selection: 'rgba(79, 195, 247, 0.3)',
+      black: '#1e1e1e',
+      brightBlack: '#858585',
+      red: '#f48771',
+      brightRed: '#f48771',
+      green: '#4ec9b0',
+      brightGreen: '#4ec9b0',
+      yellow: '#dcdcaa',
+      brightYellow: '#dcdcaa',
+      blue: '#569cd6',
+      brightBlue: '#569cd6',
+      magenta: '#c586c0',
+      brightMagenta: '#c586c0',
+      cyan: '#4fc3f7',
+      brightCyan: '#4fc3f7',
+      white: '#d4d4d4',
+      brightWhite: '#d4d4d4'
+    };
 
-  const term = new Terminal({
-    cursorBlink: true,
-    cursorStyle: 'block',
-    fontSize: font_size,
-    fontFamily: "'Monaco', 'Courier New', monospace",
-    lineHeight: 1.2,
-    letterSpacing: 0,
-    scrollback: 1000,
-    theme,
-    allowProposedApi: true
-  });
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontSize: font_size,
+      fontFamily: "'Monaco', 'Courier New', monospace",
+      lineHeight: 1.2,
+      letterSpacing: 0,
+      scrollback: 1000,
+      theme,
+      allowProposedApi: true
+    });
 
-  const fitAddon = new window.FitAddon();
-  term.loadAddon(fitAddon);
-
-  term_elem.setAttribute('autocomplete', 'off');
-  term_elem.setAttribute('spellcheck', 'false');
-
-  term.open(term_elem);
-  fitAddon.fit();
-
-  const session = sessions.get(session_id);
-  term.onData((data) => {
-    if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
-      session.ws.send(JSON.stringify({
-        type: 'input',
-        data: btoa(data)
-      }));
-    }
-  });
-
-  const fit_to_viewport = () => {
+    let fitAddon;
     try {
-      if (active_session_id === session_id && fitAddon) {
-        fitAddon.fit();
-      }
-    } catch (err) {
-      console.error('Fit error:', err);
+      fitAddon = new window.FitAddon();
+    } catch (addon_err) {
+      log_session_state('terminal_init_error', { session_id, reason: 'fitaddon_failed', error: addon_err.message });
+      return false;
     }
-  };
 
-  window.addEventListener('resize', fit_to_viewport);
-  window.addEventListener('orientationchange', () => {
-    setTimeout(fit_to_viewport, 100);
-  });
+    term.loadAddon(fitAddon);
 
-  document.addEventListener('fullscreenchange', fit_to_viewport);
-  document.addEventListener('webkitfullscreenchange', fit_to_viewport);
+    term_elem.setAttribute('autocomplete', 'off');
+    term_elem.setAttribute('spellcheck', 'false');
 
-  session.term = term;
-  session.fitAddon = fitAddon;
-  log_session_state('terminal_initialized', { session_id });
-  return true;
+    term.open(term_elem);
+    fitAddon.fit();
+
+    const session = sessions.get(session_id);
+    term.onData((data) => {
+      if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(JSON.stringify({
+          type: 'input',
+          data: btoa(data)
+        }));
+      }
+    });
+
+    const fit_to_viewport = () => {
+      try {
+        if (active_session_id === session_id && fitAddon) {
+          fitAddon.fit();
+        }
+      } catch (err) {
+        console.error('Fit error:', err);
+      }
+    };
+
+    window.addEventListener('resize', fit_to_viewport);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(fit_to_viewport, 100);
+    });
+
+    document.addEventListener('fullscreenchange', fit_to_viewport);
+    document.addEventListener('webkitfullscreenchange', fit_to_viewport);
+
+    session.term = term;
+    session.fitAddon = fitAddon;
+    log_session_state('terminal_initialized', { session_id });
+    return true;
+  } catch (err) {
+    log_session_state('terminal_init_error', { session_id, reason: 'initialization_failed', error: err.message });
+    return false;
+  }
 }
 
 function add_session_tab(session_id, token) {
