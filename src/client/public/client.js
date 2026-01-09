@@ -273,19 +273,31 @@ function set_message(msg, is_error = false) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  init_terminal();
+  function wait_for_terminal_libs(callback, max_attempts = 50) {
+    if (typeof Terminal !== 'undefined' && typeof window.FitAddon !== 'undefined') {
+      callback();
+    } else if (max_attempts > 0) {
+      setTimeout(() => wait_for_terminal_libs(callback, max_attempts - 1), 100);
+    } else {
+      console.error('Timeout: xterm libraries failed to load');
+    }
+  }
 
-  const params = parse_url_params();
+  wait_for_terminal_libs(() => {
+    init_terminal();
 
-  document.getElementById('password-submit').addEventListener('click', handle_password_submit);
-  document.getElementById('password-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      handle_password_submit();
+    const params = parse_url_params();
+
+    document.getElementById('password-submit').addEventListener('click', handle_password_submit);
+    document.getElementById('password-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handle_password_submit();
+      }
+    });
+
+    if (params.session_id && params.token) {
+      document.getElementById('password-modal').classList.remove('active');
+      connectToSession();
     }
   });
-
-  if (params.session_id && params.token) {
-    document.getElementById('password-modal').classList.remove('active');
-    connectToSession();
-  }
 });
