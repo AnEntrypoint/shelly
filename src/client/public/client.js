@@ -3,6 +3,82 @@ let fitAddon;
 let ws;
 let is_connected = false;
 let current_session = null;
+let current_password = null;
+let available_sessions = [];
+
+async function fetch_sessions_by_password(password) {
+  try {
+    const response = await fetch('/api/sessions/by-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch sessions');
+    }
+
+    const data = await response.json();
+    return data.sessions || [];
+  } catch (err) {
+    console.error('Fetch sessions error:', err);
+    return [];
+  }
+}
+
+function display_sessions(sessions) {
+  const list = document.getElementById('sessions-list');
+  const msg = document.getElementById('modal-message');
+
+  if (sessions.length === 0) {
+    msg.textContent = 'No active sessions found';
+    list.innerHTML = '';
+    return;
+  }
+
+  msg.textContent = `Found ${sessions.length} active session(s)`;
+  list.innerHTML = sessions.map(s => `
+    <div class="session-item" onclick="select_session('${s.id}', '${s.token}')">
+      <div class="session-item-id">Session: ${s.id.substring(0, 12)}...</div>
+      <div class="session-item-info">
+        Clients: ${s.clients} | Uptime: ${Math.floor(s.uptime_ms / 1000)}s
+      </div>
+    </div>
+  `).join('');
+}
+
+function select_session(session_id, token) {
+  const params = new URLSearchParams();
+  params.set('session_id', session_id);
+  params.set('token', token);
+  params.set('type', 'viewer');
+
+  window.location.search = params.toString();
+}
+
+async function handle_password_submit() {
+  const password_input = document.getElementById('password-input');
+  const password = password_input.value;
+
+  if (!password) {
+    document.getElementById('modal-message').textContent = 'Please enter a password';
+    return;
+  }
+
+  document.getElementById('password-submit').disabled = true;
+  document.getElementById('modal-message').textContent = 'Loading sessions...';
+
+  try {
+    const sessions = await fetch_sessions_by_password(password);
+    current_password = password;
+    available_sessions = sessions;
+    display_sessions(sessions);
+  } catch (err) {
+    document.getElementById('modal-message').textContent = 'Error loading sessions';
+  } finally {
+    document.getElementById('password-submit').disabled = false;
+  }
+}
 
 function init_terminal() {
   const is_mobile = window.innerWidth < 768;
@@ -200,7 +276,16 @@ document.addEventListener('DOMContentLoaded', () => {
   init_terminal();
 
   const params = parse_url_params();
+
+  document.getElementById('password-submit').addEventListener('click', handle_password_submit);
+  document.getElementById('password-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      handle_password_submit();
+    }
+  });
+
   if (params.session_id && params.token) {
+    document.getElementById('password-modal').classList.remove('active');
     connectToSession();
   }
 });

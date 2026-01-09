@@ -215,19 +215,26 @@ async function run_cli() {
   if (command === 'new') {
     const server_url = args[1] || 'http://localhost:3000';
     const shell_token = args[2];
+    const password = args[3] || null;
 
     if (!shell_token) {
-      console.error('usage: node cli.js new <server_url> <shell_token>');
+      console.error('usage: node cli.js new [server_url] <shell_token> [password]');
       process.exit(1);
     }
 
     try {
+      const body = {};
+      if (password) {
+        body.password = password;
+      }
+
       const fetch_response = await fetch(`${server_url}/api/session`, {
         method: 'POST',
         headers: {
           'authorization': `Bearer ${shell_token}`,
           'content-type': 'application/json'
-        }
+        },
+        body: JSON.stringify(body)
       });
 
       if (!fetch_response.ok) {
@@ -248,7 +255,12 @@ async function run_cli() {
       session.start_input_loop();
 
       console.log(`[session: ${session.id}]`);
-      console.log(`[web: ${server_url}?session_id=${session.id}&token=${session.token}&shell_token=${shell_token}]`);
+      if (password) {
+        console.log(`[password-protected: yes]`);
+        console.log(`[web: ${server_url} (enter password to access)]`);
+      } else {
+        console.log(`[web: ${server_url}?session_id=${session.id}&token=${session.token}]`);
+      }
 
       process.on('SIGWINCH', () => {
         session.resize(process.stdout.columns, process.stdout.rows);
