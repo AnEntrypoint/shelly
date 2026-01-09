@@ -112,10 +112,16 @@ function init_h264_video_stream() {
           } else if (msg.type === 'h264_chunk' && msg.data) {
             if (h264_decoder && h264_decoder.sourceBuffer) {
               try {
-                // Append H.264 chunk to MediaSource SourceBuffer for native decoding
-                const chunk = Buffer.from(msg.data, 'base64');
+                // Decode base64 to binary and convert to Uint8Array for MediaSource
+                const binaryString = atob(msg.data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+
                 if (h264_decoder.sourceBuffer.updating === false) {
-                  h264_decoder.sourceBuffer.appendBuffer(chunk);
+                  h264_decoder.sourceBuffer.appendBuffer(bytes);
+                  console.log('H.264 Stream: Appended', bytes.length, 'bytes');
                 }
               } catch (append_err) {
                 console.warn('H.264 Stream: Failed to append chunk', append_err);
