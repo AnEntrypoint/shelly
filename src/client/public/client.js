@@ -1018,6 +1018,15 @@ function switch_to_tab(session_id) {
       document.getElementById('disconnect-btn').disabled = false;
       document.getElementById('vnc-button').disabled = false;
       set_message('Connected. Type to interact.');
+    } else if (!session.is_connected && !session.term) {
+      // Not connected and terminal not initialized yet - show disconnected state
+      update_status('disconnected', false);
+      document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+      document.getElementById('session-info').style.display = 'flex';
+      document.getElementById('connect-btn').disabled = false;
+      document.getElementById('disconnect-btn').disabled = true;
+      document.getElementById('vnc-button').disabled = true;
+      set_message('Click Connect to establish connection');
     }
   }
 
