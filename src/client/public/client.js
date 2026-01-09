@@ -38,6 +38,7 @@ function open_all_sessions(session_list) {
 
   if (session_list.length === 0) {
     document.getElementById('modal-message').textContent = 'No active sessions found';
+    document.getElementById('tabs-bar').style.display = 'none';
     return;
   }
 
@@ -96,6 +97,12 @@ async function handle_password_submit() {
 }
 
 function init_terminal_for_session(session_id) {
+  const term_elem = document.getElementById(`terminal-${session_id}`);
+  if (!term_elem) {
+    log_session_state('terminal_init_error', { session_id, reason: 'dom_element_not_found' });
+    return false;
+  }
+
   const is_mobile = window.innerWidth < 768;
   const font_size = is_mobile ? 11 : 13;
   const theme = {
@@ -137,7 +144,6 @@ function init_terminal_for_session(session_id) {
   const fitAddon = new window.FitAddon();
   term.loadAddon(fitAddon);
 
-  const term_elem = document.getElementById(`terminal-${session_id}`);
   term_elem.setAttribute('autocomplete', 'off');
   term_elem.setAttribute('spellcheck', 'false');
 
@@ -175,6 +181,7 @@ function init_terminal_for_session(session_id) {
   session.term = term;
   session.fitAddon = fitAddon;
   log_session_state('terminal_initialized', { session_id });
+  return true;
 }
 
 function add_session_tab(session_id, token) {
@@ -273,6 +280,14 @@ async function connectToSession(session_id = null) {
   set_message('Connecting...');
 
   try {
+    if (!session.term) {
+      const term_init_ok = init_terminal_for_session(sid);
+      if (!term_init_ok) {
+        set_message('Terminal initialization failed', true);
+        return;
+      }
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws_url = `${protocol}//${window.location.host}?session_id=${sid}&token=${session.token}&type=viewer`;
 
@@ -329,10 +344,6 @@ async function connectToSession(session_id = null) {
       update_status('disconnected', false);
       log_session_state('websocket_error', { session_id: sid, error: err.message });
     };
-
-    if (!session.term) {
-      init_terminal_for_session(sid);
-    }
 
   } catch (err) {
     set_message(`Error: ${err.message}`, true);
