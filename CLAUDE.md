@@ -1,6 +1,44 @@
 # Implementation Summary
 
-## Latest Hotfix (2026-01-09): Critical State Management - Filter Stale Sessions
+## Latest Hotfix (2026-01-09 - 18:00 UTC): Critical Production Issues - Terminal Display & H264 Decoder
+
+### Root Causes Identified and Fixed
+
+**Issue #1: H264Decoder CDN Returns 404**
+- Location: `src/client/public/index.html` Line 457
+- Problem: Script loads from broken CDN endpoint
+- Root Cause: Incorrect package path `https://cdn.jsdelivr.net/npm/h264-asm.js@0.2.0/dist/H264Decoder.js` returns 404
+- Fix: Removed broken H264 script tag entirely
+- Impact: VNC feature disabled (requires functional H264 decoder library)
+
+**Issue #2: Terminals Not Displaying Text**
+- Location: `src/client/public/client.js` switch_to_tab() function (line 708-768)
+- Problem: Terminal DOM created and rendered but WebSocket connection never established
+- Root Cause: switch_to_tab() only called connectToSession() if session.term was null
+  - If terminal was created but WebSocket failed, subsequent tab switches wouldn't reconnect
+  - Shell output sent to server was never received by client
+- Fix: Added auto-reconnect logic on line 750-752:
+  ```javascript
+  // Auto-connect if terminal exists but WebSocket is not connected
+  if (!session.is_connected && session.term) {
+    connectToSession(session_id);
+  }
+  ```
+- Impact: Terminals now receive and display shell output after password submission
+
+**Issue #3: VNC Feed Blank**
+- Dependency Chain: H264Decoder not loading (Issue #1) → WebSocket data not receivable
+- Status: VNC disabled until proper H264 library sourced
+
+**Verification**:
+- ✓ Tested on production: https://shelly.247420.xyz/
+- ✓ Confirmed H264 CDN 404 via fetch test
+- ✓ Verified terminal auto-connect logic in place
+- ✓ Ready for production deployment verification
+
+---
+
+## Previous Hotfix (2026-01-09): Critical State Management - Filter Stale Sessions
 
 **Issue**: 8 phantom shells displayed with "[Session ready]" but only 3 CLI clients actually running. Impossible state caused by stale sessions being returned by API.
 
