@@ -1,6 +1,8 @@
-[providers]
-nodejs = "22"
-python = "3.11"
+[[providers]]
+name = "nodejs"
+
+[[providers]]
+name = "python"
 
 [build]
 cmds = ["npm install --verbose", "npm rebuild node-pty --verbose"]
