@@ -670,7 +670,13 @@ function init_terminal_for_session(session_id) {
         return;
       }
 
-      term.write(data);
+      try {
+        if (session.term) {
+          session.term.write(data);
+        }
+      } catch (err) {
+        log_session_state('term_write_error', { session_id, error: err.message });
+      }
 
       if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
