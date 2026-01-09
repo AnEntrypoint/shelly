@@ -78,9 +78,10 @@ class PersistentSession {
 
         setTimeout(() => {
           if (!this.is_connected) {
+            log_state('cli_timeout_fired', false, true, 'timeout_handler');
             reject(new Error('connection_timeout'));
           }
-        }, 5000);
+        }, 15000);
       } catch (err) {
         reject(err);
       }

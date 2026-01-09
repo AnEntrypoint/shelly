@@ -369,8 +369,9 @@ wss.on('connection', (ws, req) => {
   const session_id = url.searchParams.get('session_id');
   const token = url.searchParams.get('token');
   const endpoint = url.pathname;
+  const client_type = url.searchParams.get('type') || 'unknown';
 
-  log_state('ws_auth_attempt', null, { session_id, token_len: token?.length || 0, endpoint }, 'ws_connection_received');
+  log_state('ws_connection_received', null, { session_id: session_id?.substring(0, 8), token_len: token?.length || 0, endpoint, client_type, client_id: client_id.substring(0, 8) }, 'ws_handshake_started');
 
   const session = sessions.get(session_id);
   if (!session) {
