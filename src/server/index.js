@@ -234,8 +234,27 @@ app.post('/api/sessions/by-password', (req, res) => {
   const password_hash = hash_password(password);
   const session_ids = password_groups.get(password_hash) || [];
 
+  log_state('debug_password_lookup', null, {
+    password_hash: password_hash.substring(0, 8),
+    session_ids_in_group: session_ids.length,
+    total_sessions: sessions.size,
+    group_exists: password_groups.has(password_hash)
+  }, 'debug_password_access');
+
   const sessions_list = session_ids
-    .map(id => sessions.get(id))
+    .map(id => {
+      const s = sessions.get(id);
+      if (s) {
+        log_state('debug_session_check', null, {
+          session_id: id.substring(0, 8),
+          is_active: s.is_active,
+          has_active_provider: s.has_active_provider,
+          provider_id: s.shell_provider_id?.substring(0, 8) || null,
+          provider_connected: s.shell_provider_id ? (clients.get(s.shell_provider_id)?.ws?.readyState === 1) : false
+        }, 'debug_session_filter');
+      }
+      return s;
+    })
     .filter(s => {
       if (!s || !s.is_active || !s.has_active_provider) {
         return false;
