@@ -715,14 +715,18 @@ function init_terminal_for_session(session_id) {
       }
     };
 
-    term.onData((data) => send_terminal_input(data));
+    term.onData((data) => {
+      console.log('XTERM_ONDATA_FIRED', { session_id, data_len: data.length });
+      send_terminal_input(data);
+    });
 
     // Fallback: Listen directly to the xterm textarea for keyboard input
     // This handles cases where xterm's onData doesn't fire
     setTimeout(() => {
       const textarea = document.querySelector('.xterm-helper-textarea');
       if (textarea) {
-        let last_value = '';
+        // Track the last sent input to avoid duplicates
+        let last_sent_input = '';
 
         // Listen for paste events
         textarea.addEventListener('paste', (e) => {
@@ -733,24 +737,27 @@ function init_terminal_for_session(session_id) {
           }
         });
 
-        // Listen for text input changes (includes typed characters and deletion)
-        textarea.addEventListener('input', (e) => {
-          const current_value = textarea.value;
-          const new_text = current_value.substring(last_value.length);
-
-          if (new_text) {
-            // User typed new characters
-            send_terminal_input(new_text);
-          } else if (current_value.length < last_value.length) {
-            // User deleted characters (backspace)
-            const deleted_count = last_value.length - current_value.length;
-            for (let i = 0; i < deleted_count; i++) {
-              send_terminal_input('\x7f'); // DEL character
-            }
+        // Monitor for ANY change - xterm clears textarea after each character,
+        // so we need to send input based on what appears in the textarea
+        const checkForInput = () => {
+          const current_text = textarea.value;
+          if (current_text && current_text !== last_sent_input) {
+            // Send the new text that appeared
+            send_terminal_input(current_text);
+            last_sent_input = '';
           }
+        };
 
-          last_value = current_value;
-        });
+        // Poll frequently to catch input before it's cleared
+        textarea.addEventListener('keydown', checkForInput);
+        textarea.addEventListener('input', checkForInput);
+
+        // Also set up a rapid poll as backup
+        setInterval(() => {
+          if (textarea && active_session_id === session_id) {
+            checkForInput();
+          }
+        }, 25);
 
         console.log('TEXTAREA_INPUT_LISTENER_ADDED', { session_id });
       }
