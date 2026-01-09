@@ -1,10 +1,17 @@
-let term;
-let fitAddon;
-let ws;
-let is_connected = false;
-let current_session = null;
+const sessions = new Map();
+let active_session_id = null;
 let current_password = null;
 let available_sessions = [];
+
+function log_session_state(causation, details = {}) {
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    causation,
+    active_session: active_session_id,
+    session_count: sessions.size,
+    details
+  }));
+}
 
 async function fetch_sessions_by_password(password) {
   try {
@@ -26,25 +33,27 @@ async function fetch_sessions_by_password(password) {
   }
 }
 
-function display_sessions(sessions) {
-  const list = document.getElementById('sessions-list');
-  const msg = document.getElementById('modal-message');
+function open_all_sessions(session_list) {
+  log_session_state('opening_all_sessions', { count: session_list.length });
 
-  if (sessions.length === 0) {
-    msg.textContent = 'No active sessions found';
-    list.innerHTML = '';
+  if (session_list.length === 0) {
+    document.getElementById('modal-message').textContent = 'No active sessions found';
     return;
   }
 
-  msg.textContent = `Found ${sessions.length} active session(s)`;
-  list.innerHTML = sessions.map(s => `
-    <div class="session-item" onclick="select_session('${s.id}', '${s.token}')">
-      <div class="session-item-id">Session: ${s.id.substring(0, 12)}...</div>
-      <div class="session-item-info">
-        Clients: ${s.clients} | Uptime: ${Math.floor(s.uptime_ms / 1000)}s
-      </div>
-    </div>
-  `).join('');
+  session_list.forEach((s, index) => {
+    add_session_tab(s.id, s.token);
+    if (index === 0) {
+      active_session_id = s.id;
+    }
+  });
+
+  if (sessions.size > 0) {
+    document.getElementById('password-modal').classList.remove('active');
+    document.getElementById('tabs-bar').style.display = 'flex';
+    switch_to_tab(active_session_id);
+    log_session_state('all_sessions_opened', { active: active_session_id });
+  }
 }
 
 function select_session(session_id, token) {
@@ -73,22 +82,47 @@ async function handle_password_submit() {
   document.getElementById('modal-message').textContent = 'Loading sessions...';
 
   try {
-    const sessions = await fetch_sessions_by_password(password);
+    const session_list = await fetch_sessions_by_password(password);
     current_password = password;
-    available_sessions = sessions;
-    display_sessions(sessions);
+    available_sessions = session_list;
+    log_session_state('password_submitted', { session_count: session_list.length });
+    open_all_sessions(session_list);
   } catch (err) {
     document.getElementById('modal-message').textContent = 'Error loading sessions';
+    log_session_state('password_submit_error', { error: err.message });
   } finally {
     document.getElementById('password-submit').disabled = false;
   }
 }
 
-function init_terminal() {
+function init_terminal_for_session(session_id) {
   const is_mobile = window.innerWidth < 768;
   const font_size = is_mobile ? 11 : 13;
+  const theme = {
+    background: '#1e1e1e',
+    foreground: '#d4d4d4',
+    cursor: '#d4d4d4',
+    cursorAccent: '#1e1e1e',
+    selection: 'rgba(79, 195, 247, 0.3)',
+    black: '#1e1e1e',
+    brightBlack: '#858585',
+    red: '#f48771',
+    brightRed: '#f48771',
+    green: '#4ec9b0',
+    brightGreen: '#4ec9b0',
+    yellow: '#dcdcaa',
+    brightYellow: '#dcdcaa',
+    blue: '#569cd6',
+    brightBlue: '#569cd6',
+    magenta: '#c586c0',
+    brightMagenta: '#c586c0',
+    cyan: '#4fc3f7',
+    brightCyan: '#4fc3f7',
+    white: '#d4d4d4',
+    brightWhite: '#d4d4d4'
+  };
 
-  term = new Terminal({
+  const term = new Terminal({
     cursorBlink: true,
     cursorStyle: 'block',
     fontSize: font_size,
@@ -96,45 +130,24 @@ function init_terminal() {
     lineHeight: 1.2,
     letterSpacing: 0,
     scrollback: 1000,
-    theme: {
-      background: '#1e1e1e',
-      foreground: '#d4d4d4',
-      cursor: '#d4d4d4',
-      cursorAccent: '#1e1e1e',
-      selection: 'rgba(79, 195, 247, 0.3)',
-      black: '#1e1e1e',
-      brightBlack: '#858585',
-      red: '#f48771',
-      brightRed: '#f48771',
-      green: '#4ec9b0',
-      brightGreen: '#4ec9b0',
-      yellow: '#dcdcaa',
-      brightYellow: '#dcdcaa',
-      blue: '#569cd6',
-      brightBlue: '#569cd6',
-      magenta: '#c586c0',
-      brightMagenta: '#c586c0',
-      cyan: '#4fc3f7',
-      brightCyan: '#4fc3f7',
-      white: '#d4d4d4',
-      brightWhite: '#d4d4d4'
-    },
+    theme,
     allowProposedApi: true
   });
 
-  fitAddon = new window.FitAddon();
+  const fitAddon = new window.FitAddon();
   term.loadAddon(fitAddon);
 
-  const term_elem = document.getElementById('terminal');
+  const term_elem = document.getElementById(`terminal-${session_id}`);
   term_elem.setAttribute('autocomplete', 'off');
   term_elem.setAttribute('spellcheck', 'false');
 
   term.open(term_elem);
   fitAddon.fit();
 
+  const session = sessions.get(session_id);
   term.onData((data) => {
-    if (is_connected && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
+    if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
+      session.ws.send(JSON.stringify({
         type: 'input',
         data: btoa(data)
       }));
@@ -143,7 +156,9 @@ function init_terminal() {
 
   const fit_to_viewport = () => {
     try {
-      fitAddon.fit();
+      if (active_session_id === session_id && fitAddon) {
+        fitAddon.fit();
+      }
     } catch (err) {
       console.error('Fit error:', err);
     }
@@ -157,8 +172,80 @@ function init_terminal() {
   document.addEventListener('fullscreenchange', fit_to_viewport);
   document.addEventListener('webkitfullscreenchange', fit_to_viewport);
 
-  update_status('disconnected', false);
-  set_message('Ready to connect. Click "Connect" or pass session params in URL.');
+  session.term = term;
+  session.fitAddon = fitAddon;
+  log_session_state('terminal_initialized', { session_id });
+}
+
+function add_session_tab(session_id, token) {
+  if (sessions.has(session_id)) {
+    log_session_state('duplicate_session_ignored', { session_id });
+    return;
+  }
+
+  sessions.set(session_id, {
+    id: session_id,
+    token,
+    term: null,
+    fitAddon: null,
+    ws: null,
+    is_connected: false
+  });
+
+  const tab_bar = document.getElementById('tabs-bar');
+  const tab = document.createElement('div');
+  tab.className = 'tab';
+  tab.id = `tab-${session_id}`;
+  tab.textContent = session_id.substring(0, 8);
+  tab.onclick = () => switch_to_tab(session_id);
+  tab_bar.appendChild(tab);
+
+  const terminals_container = document.getElementById('terminals');
+  const term_div = document.createElement('div');
+  term_div.id = `terminal-${session_id}`;
+  term_div.className = 'terminal-instance';
+  terminals_container.appendChild(term_div);
+
+  log_session_state('session_tab_added', { session_id });
+}
+
+function switch_to_tab(session_id) {
+  if (!sessions.has(session_id)) {
+    log_session_state('invalid_session_switch', { session_id });
+    return;
+  }
+
+  const prev_active = active_session_id;
+  active_session_id = session_id;
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.remove('active');
+  });
+  const tab = document.getElementById(`tab-${session_id}`);
+  if (tab) tab.classList.add('active');
+
+  document.querySelectorAll('.terminal-instance').forEach(t => {
+    t.style.display = 'none';
+  });
+  const term_div = document.getElementById(`terminal-${session_id}`);
+  if (term_div) term_div.style.display = 'block';
+
+  const session = sessions.get(session_id);
+  if (session.term) {
+    try {
+      session.fitAddon.fit();
+      session.term.focus();
+    } catch (err) {
+      console.error('Tab switch error:', err);
+    }
+  }
+
+  update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
+  if (session.is_connected) {
+    document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+  }
+
+  log_session_state('switched_to_tab', { prev: prev_active, current: session_id });
 }
 
 function parse_url_params() {
@@ -170,48 +257,53 @@ function parse_url_params() {
   };
 }
 
-async function connectToSession() {
-  const params = parse_url_params();
+async function connectToSession(session_id = null) {
+  const sid = session_id || active_session_id;
+  if (!sid) {
+    set_message('No session selected', true);
+    return;
+  }
 
-  if (!params.session_id || !params.token) {
-    set_message('Missing session_id or token in URL', true);
+  const session = sessions.get(sid);
+  if (!session) {
+    set_message('Invalid session', true);
     return;
   }
 
   set_message('Connecting...');
-  document.getElementById('connect-btn').disabled = true;
 
   try {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws_url = `${protocol}//${window.location.host}?session_id=${params.session_id}&token=${params.token}&type=viewer`;
+    const ws_url = `${protocol}//${window.location.host}?session_id=${sid}&token=${session.token}&type=viewer`;
 
-    ws = new WebSocket(ws_url);
+    const ws = new WebSocket(ws_url);
 
     ws.onopen = () => {
-      is_connected = true;
-      current_session = params.session_id;
+      session.is_connected = true;
+      session.ws = ws;
       update_status('connected', true);
-      document.getElementById('password-modal').classList.remove('active');
       document.getElementById('session-info').style.display = 'flex';
-      document.getElementById('session-id').textContent = `Session: ${params.session_id.substring(0, 8)}...`;
+      document.getElementById('session-id').textContent = `Session: ${sid.substring(0, 8)}...`;
       document.getElementById('connect-btn').disabled = true;
       document.getElementById('disconnect-btn').disabled = false;
       set_message('Connected. Type to interact.');
-      term.focus();
+      if (session.term) session.term.focus();
+      log_session_state('websocket_connected', { session_id: sid });
     };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-
-        if (msg.type === 'ready') {
-          term.write('\r\n[Session ready]\r\n');
-        } else if (msg.type === 'buffer' && msg.data) {
-          const decoded = atob(msg.data);
-          term.write(decoded);
-        } else if (msg.type === 'output' && msg.data) {
-          const decoded = atob(msg.data);
-          term.write(decoded);
+        if (session.term) {
+          if (msg.type === 'ready') {
+            session.term.write('\r\n[Session ready]\r\n');
+          } else if (msg.type === 'buffer' && msg.data) {
+            const decoded = atob(msg.data);
+            session.term.write(decoded);
+          } else if (msg.type === 'output' && msg.data) {
+            const decoded = atob(msg.data);
+            session.term.write(decoded);
+          }
         }
       } catch (err) {
         console.error('Message parse error:', err);
@@ -219,37 +311,42 @@ async function connectToSession() {
     };
 
     ws.onclose = () => {
-      is_connected = false;
+      session.is_connected = false;
       update_status('disconnected', false);
-      document.getElementById('session-info').style.display = 'none';
-      document.getElementById('connect-btn').disabled = false;
-      document.getElementById('disconnect-btn').disabled = true;
+      if (active_session_id === sid) {
+        document.getElementById('session-info').style.display = 'none';
+      }
+      document.getElementById('tab-' + sid)?.classList.add('disconnected');
       set_message('Disconnected from session');
-      term.write('\r\n[Connection closed]\r\n');
+      if (session.term) session.term.write('\r\n[Connection closed]\r\n');
+      log_session_state('websocket_closed', { session_id: sid });
     };
 
     ws.onerror = (err) => {
       console.error('WebSocket error:', err);
       set_message('Connection error', true);
-      is_connected = false;
+      session.is_connected = false;
       update_status('disconnected', false);
+      log_session_state('websocket_error', { session_id: sid, error: err.message });
     };
+
+    if (!session.term) {
+      init_terminal_for_session(sid);
+    }
+
   } catch (err) {
     set_message(`Error: ${err.message}`, true);
     console.error('Connect error:', err);
-    document.getElementById('connect-btn').disabled = false;
+    log_session_state('connect_error', { session_id: sid, error: err.message });
   }
 }
 
 function disconnectSession() {
-  if (ws) {
-    ws.close();
+  const session = sessions.get(active_session_id);
+  if (session && session.ws) {
+    session.ws.close();
   }
-  is_connected = false;
-  update_status('disconnected', false);
-  document.getElementById('connect-btn').disabled = false;
-  document.getElementById('disconnect-btn').disabled = true;
-  set_message('Disconnected');
+  log_session_state('session_disconnected', { session_id: active_session_id });
 }
 
 function update_status(status, connected) {
@@ -289,10 +386,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   wait_for_terminal_libs(() => {
-    init_terminal();
-
-    const params = parse_url_params();
-
     document.getElementById('password-submit').addEventListener('click', handle_password_submit);
     document.getElementById('password-input').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
@@ -300,9 +393,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    const params = parse_url_params();
     if (params.session_id && params.token) {
       document.getElementById('password-modal').classList.remove('active');
-      connectToSession();
+      add_session_tab(params.session_id, params.token);
+      active_session_id = params.session_id;
+      document.getElementById('tabs-bar').style.display = 'flex';
+      init_terminal_for_session(params.session_id);
+      connectToSession(params.session_id);
     }
+
+    log_session_state('page_initialized', { has_url_params: !!params.session_id });
   });
 });
