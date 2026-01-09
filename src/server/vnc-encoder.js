@@ -60,13 +60,21 @@ class VncEncoder {
 
   on_frame(callback) {
     if (!this.ffmpeg_process || !this.ffmpeg_process.stdout) {
+      this.log_state('encoder_callback_setup_failed', null, 'no_stdout', 'callback_setup');
       return;
     }
+
+    this.log_state('encoder_callback_attached', null, 'listening_for_chunks', 'callback_setup');
 
     this.ffmpeg_process.stdout.on('data', (chunk) => {
       this.frame_count++;
       const now = Date.now();
       const elapsed = now - this.last_frame_time;
+
+      // Log EVERY chunk received
+      if (this.frame_count <= 5 || this.frame_count % 50 === 0) {
+        this.log_state('ffmpeg_chunk_received', `chunk_${this.frame_count - 1}`, `${chunk.length}_bytes`, 'chunk_data');
+      }
 
       if (elapsed >= 5000) {
         this.log_state('encoder_throughput', `${this.frame_count}_chunks`, `${(this.frame_count * 1000 / elapsed).toFixed(1)}_chunks_per_sec`, 'encoder_stats');

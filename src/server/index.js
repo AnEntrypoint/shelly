@@ -435,7 +435,13 @@ wss.on('connection', (ws, req) => {
 
       log_state('h264_stream_started', null, `${video_width}x${video_height}@${framerate}fps`, 'video_stream_init');
 
+      let chunk_count = 0;
       encoder.on_frame((chunk) => {
+        chunk_count++;
+        if (chunk_count <= 5 || chunk_count % 100 === 0) {
+          log_state('h264_chunk_ready_to_send', null, `${chunk.length}_bytes`, 'chunk_send_prep');
+        }
+
         if (ws.readyState === 1) {
           try {
             const msg = pack.pack({
@@ -445,9 +451,15 @@ wss.on('connection', (ws, req) => {
               timestamp: Date.now()
             });
             ws.send(msg);
+
+            if (chunk_count <= 5 || chunk_count % 100 === 0) {
+              log_state('h264_chunk_sent_to_ws', null, `${msg.length}_bytes_packed`, 'chunk_sent');
+            }
           } catch (err) {
             log_state('h264_send_error', null, err.message, 'video_send_failed');
           }
+        } else {
+          log_state('h264_ws_not_ready', null, `readyState=${ws.readyState}`, 'ws_state_check');
         }
       });
 
