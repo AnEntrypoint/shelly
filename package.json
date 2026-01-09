@@ -6,7 +6,7 @@
   "main": "src/server/index.js",
   "scripts": {
     "dev": "node src/server/index.js",
-    "cli": "node src/cli/index.js",
+    "cli": "node src/client/shell.js",
     "build": "echo 'No build step needed'"
   },
   "dependencies": {
