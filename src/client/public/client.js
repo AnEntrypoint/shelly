@@ -3,15 +3,350 @@ let active_session_id = null;
 let current_password = null;
 let available_sessions = [];
 let polling_interval = null;
+let vnc_rfb = null;
+let vnc_tunnel_ws = null;
+let h264_video_ws = null;
+let h264_decoder = null;
+let packer = null;
+
+const USER_FACING_LOG_EVENTS = new Set([
+  'websocket_connected',
+  'websocket_closed',
+  'websocket_error',
+  'password_submitted',
+  'password_submit_error',
+  'connect_error',
+  'vnc_tunnel_opened',
+  'vnc_tunnel_closed',
+  'vnc_tunnel_error',
+  'h264_stream_opened',
+  'h264_stream_closed',
+  'h264_stream_error',
+  'terminal_init_error',
+  'session_removed'
+]);
 
 function log_session_state(causation, details = {}) {
-  console.error(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    causation,
-    active_session: active_session_id,
-    session_count: sessions.size,
-    details
-  }));
+  if (USER_FACING_LOG_EVENTS.has(causation)) {
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      causation,
+      active_session: active_session_id,
+      session_count: sessions.size,
+      details
+    }));
+  }
+}
+
+function toggle_vnc_modal() {
+  const modal = document.getElementById('vnc-modal');
+  modal.classList.toggle('active');
+  if (modal.classList.contains('active')) {
+    init_h264_video_stream();
+  } else {
+    close_h264_video_stream();
+  }
+}
+
+function init_h264_video_stream() {
+  if (!active_session_id) {
+    alert('No active session');
+    return;
+  }
+
+  const session = sessions.get(active_session_id);
+  if (!session || !session.token) {
+    alert('Invalid session');
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const video_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}&fps=5`;
+
+  try {
+    h264_video_ws = new WebSocket(video_url);
+    h264_video_ws.binaryType = 'arraybuffer';
+
+    h264_video_ws.onopen = () => {
+      log_session_state('h264_stream_opened', { url: video_url });
+    };
+
+    h264_video_ws.onmessage = (event) => {
+      try {
+        if (!packer) packer = window.Packr ? new window.Packr() : null;
+
+        if (packer && event.data instanceof ArrayBuffer) {
+          const msg = packer.unpack(new Uint8Array(event.data));
+
+          if (msg.type === 'ready' && msg.stream_type === 'h264_video') {
+            log_session_state('h264_stream_ready', {
+              width: msg.width,
+              height: msg.height,
+              fps: msg.fps
+            });
+            init_h264_video_player(msg.width, msg.height);
+          } else if (msg.type === 'h264_chunk' && msg.data) {
+            const chunk = Buffer.from(msg.data, 'base64');
+            if (h264_decoder) {
+              h264_decoder.decode(chunk);
+            }
+          }
+        }
+      } catch (err) {
+        log_session_state('h264_message_error', { error: err.message });
+      }
+    };
+
+    h264_video_ws.onclose = () => {
+      log_session_state('h264_stream_closed', {});
+      close_h264_video_stream();
+    };
+
+    h264_video_ws.onerror = (err) => {
+      log_session_state('h264_stream_error', { error: err.message });
+    };
+  } catch (err) {
+    log_session_state('h264_stream_init_error', { error: err.message });
+    alert(`H.264 stream error: ${err.message}`);
+  }
+}
+
+function init_h264_video_player(width, height) {
+  const viewer = document.getElementById('vnc-viewer');
+  viewer.innerHTML = '';
+
+  try {
+    const video_container = document.createElement('div');
+    video_container.style.position = 'relative';
+    video_container.style.width = '100%';
+    video_container.style.height = '100%';
+    viewer.appendChild(video_container);
+
+    const video_elem = document.createElement('video');
+    video_elem.id = 'h264-video-player';
+    video_elem.style.width = '100%';
+    video_elem.style.height = '100%';
+    video_elem.style.backgroundColor = '#000';
+    video_elem.style.display = 'block';
+    video_elem.autoplay = true;
+    video_elem.muted = true;
+    video_container.appendChild(video_elem);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'h264-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.userSelect = 'text';
+    overlay.style.WebkitUserSelect = 'text';
+    overlay.style.MozUserSelect = 'text';
+    overlay.style.msUserSelect = 'text';
+    overlay.style.cursor = 'default';
+    overlay.style.zIndex = '1';
+    overlay.textContent = 'H.264 video stream active - select text to copy';
+    overlay.style.color = 'rgba(255, 255, 255, 0.3)';
+    overlay.style.fontSize = '12px';
+    overlay.style.padding = '10px';
+    overlay.style.pointerEvents = 'auto';
+    video_container.appendChild(overlay);
+
+    if (window.H264Decoder) {
+      h264_decoder = new window.H264Decoder();
+      h264_decoder.onPictureDecoded = (buffer, width, height) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.createImageData(width, height);
+        imageData.data.set(buffer);
+        ctx.putImageData(imageData, 0, 0);
+
+        const video = document.getElementById('h264-video-player');
+        if (video) {
+          video.style.backgroundImage = `url(${canvas.toDataURL()})`;
+          video.style.backgroundSize = 'contain';
+          video.style.backgroundPosition = 'center';
+        }
+      };
+
+      log_session_state('h264_decoder_initialized', { width, height });
+    } else {
+      log_session_state('h264_decoder_unavailable', { info: 'Using fallback display' });
+    }
+  } catch (err) {
+    log_session_state('h264_player_init_error', { error: err.message });
+    viewer.innerHTML = `<p style="color: #f48771; padding: 20px;">Failed to initialize H.264 player: ${err.message}</p>`;
+  }
+}
+
+function close_h264_video_stream() {
+  if (h264_video_ws) {
+    h264_video_ws.close();
+    h264_video_ws = null;
+  }
+  if (h264_decoder) {
+    h264_decoder = null;
+  }
+  const viewer = document.getElementById('vnc-viewer');
+  if (viewer) viewer.innerHTML = '';
+  log_session_state('h264_stream_closed_manual', {});
+}
+
+function init_vnc_tunnel() {
+  if (!active_session_id) {
+    alert('No active session');
+    return;
+  }
+
+  const session = sessions.get(active_session_id);
+  if (!session || !session.token) {
+    alert('Invalid session');
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const vnc_url = `${protocol}//${window.location.host}/api/vnc?session_id=${active_session_id}&token=${session.token}`;
+
+  try {
+    vnc_tunnel_ws = new WebSocket(vnc_url);
+    vnc_tunnel_ws.binaryType = 'arraybuffer';
+
+    vnc_tunnel_ws.onopen = () => {
+      log_session_state('vnc_tunnel_opened', { url: vnc_url });
+      init_novnc_viewer();
+    };
+
+    vnc_tunnel_ws.onmessage = (event) => {
+      try {
+        if (!packer) packer = window.Packr ? new window.Packr() : null;
+
+        if (packer && event.data instanceof ArrayBuffer) {
+          const msg = packer.unpack(new Uint8Array(event.data));
+          if (msg.type === 'ready' && msg.tunnel_type === 'vnc') {
+            log_session_state('vnc_tunnel_ready', {});
+          } else if (msg.type === 'vnc_frame' && msg.data && vnc_rfb) {
+            const buffer = Buffer.from(msg.data, 'base64');
+            vnc_rfb._sock.send(buffer);
+            log_session_state('vnc_frame_sent_to_rfb', { bytes: buffer.length });
+          }
+        } else if (event.data instanceof ArrayBuffer) {
+          if (vnc_rfb) {
+            vnc_rfb._sock.send(new Uint8Array(event.data));
+          }
+        }
+      } catch (err) {
+        log_session_state('vnc_message_error', { error: err.message });
+      }
+    };
+
+    vnc_tunnel_ws.onclose = () => {
+      log_session_state('vnc_tunnel_closed', {});
+      close_vnc_tunnel();
+    };
+
+    vnc_tunnel_ws.onerror = (err) => {
+      log_session_state('vnc_tunnel_error', { error: err.message });
+    };
+  } catch (err) {
+    log_session_state('vnc_tunnel_init_error', { error: err.message });
+    alert(`VNC tunnel error: ${err.message}`);
+  }
+}
+
+function init_novnc_viewer() {
+  const viewer = document.getElementById('vnc-viewer');
+  viewer.innerHTML = '';
+
+  try {
+    const viewer_wrapper = document.createElement('div');
+    viewer_wrapper.style.position = 'relative';
+    viewer_wrapper.style.width = '100%';
+    viewer_wrapper.style.height = '100%';
+    viewer.appendChild(viewer_wrapper);
+
+    const rfb = new RFB(viewer_wrapper, vnc_tunnel_ws);
+    rfb.addEventListener('connect', () => {
+      log_session_state('novnc_connected', {});
+    });
+    rfb.addEventListener('disconnect', () => {
+      log_session_state('novnc_disconnected', {});
+    });
+    rfb.addEventListener('error', (evt) => {
+      log_session_state('novnc_error', { error: evt.detail?.message });
+    });
+
+    vnc_rfb = rfb;
+
+    const tunnel_handler = (data) => {
+      if (vnc_tunnel_ws && vnc_tunnel_ws.readyState === WebSocket.OPEN) {
+        try {
+          if (!packer) packer = window.Packr ? new window.Packr() : null;
+
+          const packed = packer ? packer.pack({
+            type: 'vnc_frame',
+            session_id: active_session_id,
+            data: Buffer.from(data).toString('base64'),
+            timestamp: Date.now()
+          }) : JSON.stringify({
+            type: 'vnc_frame',
+            session_id: active_session_id,
+            data: Buffer.from(data).toString('base64'),
+            timestamp: Date.now()
+          });
+
+          vnc_tunnel_ws.send(packed);
+          log_session_state('vnc_frame_sent', { bytes: data.length });
+        } catch (err) {
+          log_session_state('vnc_send_error', { error: err.message });
+        }
+      }
+    };
+
+    rfb._sock.send = tunnel_handler;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'vnc-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.userSelect = 'text';
+    overlay.style.WebkitUserSelect = 'text';
+    overlay.style.MozUserSelect = 'text';
+    overlay.style.msUserSelect = 'text';
+    overlay.style.cursor = 'default';
+    overlay.style.zIndex = '100';
+    overlay.textContent = 'VNC Display - select text to copy';
+    overlay.style.color = 'rgba(255, 255, 255, 0.2)';
+    overlay.style.fontSize = '11px';
+    overlay.style.padding = '8px';
+    overlay.style.pointerEvents = 'none';
+    viewer_wrapper.appendChild(overlay);
+
+    log_session_state('novnc_initialized', {});
+  } catch (err) {
+    log_session_state('novnc_init_error', { error: err.message });
+    viewer.innerHTML = `<p style="color: #f48771; padding: 20px;">Failed to initialize VNC viewer: ${err.message}</p>`;
+  }
+}
+
+function close_vnc_tunnel() {
+  if (vnc_rfb) {
+    try {
+      vnc_rfb.disconnect();
+    } catch {}
+    vnc_rfb = null;
+  }
+  if (vnc_tunnel_ws) {
+    vnc_tunnel_ws.close();
+    vnc_tunnel_ws = null;
+  }
+  const viewer = document.getElementById('vnc-viewer');
+  if (viewer) viewer.innerHTML = '';
+  log_session_state('vnc_tunnel_closed_manual', {});
 }
 
 async function fetch_sessions_by_password(password) {
@@ -233,6 +568,18 @@ function init_terminal_for_session(session_id) {
 
     term.open(term_elem);
 
+    term.attachCustomKeyEventHandler((arg) => {
+      if (arg.type === 'keydown') {
+        if (arg.ctrlKey && arg.code === 'KeyC' && !arg.shiftKey) {
+          return true;
+        }
+        if ((arg.ctrlKey || arg.metaKey) && arg.code === 'KeyV' && arg.shiftKey) {
+          return true;
+        }
+      }
+      return false;
+    });
+
     // Defer fit() until next animation frame to ensure DOM layout is current
     requestAnimationFrame(() => {
       fitAddon.fit();
@@ -241,10 +588,23 @@ function init_terminal_for_session(session_id) {
     const session = sessions.get(session_id);
     term.onData((data) => {
       if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
-        session.ws.send(JSON.stringify({
+        if (!packer) packer = window.Packr ? new window.Packr() : null;
+
+        const msg = {
           type: 'input',
           data: btoa(data)
-        }));
+        };
+
+        if (packer) {
+          try {
+            const packed = packer.pack(msg);
+            session.ws.send(packed);
+          } catch {
+            session.ws.send(JSON.stringify(msg));
+          }
+        } else {
+          session.ws.send(JSON.stringify(msg));
+        }
       }
     });
 
@@ -413,7 +773,21 @@ async function connectToSession(session_id = null) {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        let msg;
+
+        if (event.data instanceof ArrayBuffer) {
+          if (!packer) packer = window.Packr ? new window.Packr() : null;
+          if (packer) {
+            msg = packer.unpack(new Uint8Array(event.data));
+          } else {
+            throw new Error('Cannot unpack: Packr not available');
+          }
+        } else if (typeof event.data === 'string') {
+          msg = JSON.parse(event.data);
+        } else {
+          throw new Error('Unknown message format');
+        }
+
         if (session.term) {
           if (msg.type === 'ready') {
             session.term.write('\r\n[Session ready]\r\n');
