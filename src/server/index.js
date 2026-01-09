@@ -330,12 +330,13 @@ wss.on('connection', (ws, req) => {
     h264_streams.set(client_id, encoder);
 
     try {
-      const display = process.env.DISPLAY || ':0';
+      const vnc_host = process.env.VNC_HOST || 'localhost';
+      const vnc_port = parseInt(process.env.VNC_PORT || '5900');
       const video_width = parseInt(url.searchParams.get('width')) || 1024;
       const video_height = parseInt(url.searchParams.get('height')) || 768;
       const framerate = Math.max(2, Math.min(10, parseInt(url.searchParams.get('fps')) || 5));
 
-      const stdout = encoder.init_display_encoder(display, video_width, video_height, framerate);
+      const stdout = encoder.init_display_encoder(vnc_host, vnc_port, video_width, video_height, framerate);
 
       ws.send(pack.pack({
         type: 'ready',

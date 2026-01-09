@@ -9,16 +9,17 @@ class VncEncoder {
     this.last_frame_time = Date.now();
   }
 
-  init_display_encoder(display = ':0', width = 1024, height = 768, framerate = 5) {
+  init_display_encoder(vnc_host = 'localhost', vnc_port = 5900, width = 1024, height = 768, framerate = 5) {
     if (this.ffmpeg_process) {
       return this.ffmpeg_process.stdout;
     }
 
+    const vnc_url = `vnc://${vnc_host}:${vnc_port}`;
     const ffmpeg_args = [
-      '-f', 'x11grab',
+      '-f', 'vnc',
       '-framerate', framerate.toString(),
       '-video_size', `${width}x${height}`,
-      '-i', display,
+      '-i', vnc_url,
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '28',
@@ -27,8 +28,7 @@ class VncEncoder {
     ];
 
     this.ffmpeg_process = spawn('ffmpeg', ffmpeg_args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, DISPLAY: display }
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     if (!this.ffmpeg_process.stdout) {
@@ -36,7 +36,7 @@ class VncEncoder {
     }
 
     this.is_encoding = true;
-    this.log_state('h264_encoder_started', null, `${width}x${height}@${framerate}fps`, 'encoder_init');
+    this.log_state('h264_encoder_started', null, `${vnc_url}@${width}x${height}@${framerate}fps`, 'encoder_init');
     return this.ffmpeg_process.stdout;
   }
 
