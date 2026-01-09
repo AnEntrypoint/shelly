@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SHELL_TOKEN=${SHELL_TOKEN:-dev-token-change-in-production}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/sessions", "-H", "Authorization: Bearer ${SHELL_TOKEN:-dev-token-change-in-production}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./src:/app/src:ro
