@@ -81,14 +81,22 @@ class VncEncoder {
 
     this.log_state('encoder_callback_attached', null, 'listening_for_chunks', 'callback_setup');
 
+    let setup_time = Date.now();
+    let first_chunk_time = null;
+
     this.ffmpeg_process.stdout.on('data', (chunk) => {
+      if (!first_chunk_time) {
+        first_chunk_time = Date.now();
+        this.log_state('ffmpeg_first_chunk_received', null, `${chunk.length}_bytes_after_${first_chunk_time - setup_time}ms`, 'first_chunk');
+      }
+
       this.frame_count++;
       const now = Date.now();
       const elapsed = now - this.last_frame_time;
 
       // Log EVERY chunk received
-      if (this.frame_count <= 5 || this.frame_count % 50 === 0) {
-        this.log_state('ffmpeg_chunk_received', `chunk_${this.frame_count - 1}`, `${chunk.length}_bytes`, 'chunk_data');
+      if (this.frame_count <= 10 || this.frame_count % 50 === 0) {
+        this.log_state('ffmpeg_chunk_received', `chunk_${this.frame_count}`, `${chunk.length}_bytes`, 'chunk_data');
       }
 
       if (elapsed >= 5000) {

@@ -139,6 +139,25 @@ class ShellSession {
     }
   }
 
+  broadcast_h264_chunk(h264_msg) {
+    for (const client_id of this.clients_connected) {
+      const client = clients.get(client_id);
+      if (client && client.ws && client.ws.readyState === 1) {
+        try {
+          const msg = pack.pack({
+            type: 'h264_chunk',
+            data: h264_msg.data,
+            session_id: this.id,
+            timestamp: h264_msg.timestamp || Date.now()
+          });
+          client.ws.send(msg);
+        } catch (err) {
+          log_state('h264_broadcast_error', null, err.message, 'h264_broadcast_failed');
+        }
+      }
+    }
+  }
+
   broadcast_log_event(event, var_name, var_value) {
     const log_msg = log_to_client(var_name, null, var_value, event);
     if (!log_msg) return;
@@ -579,6 +598,9 @@ wss.on('connection', (ws, req) => {
           const data = Buffer.from(msg.data, 'base64');
           session.broadcast_to_clients(data, client_id);
           log_state('output_broadcasted', null, `${data.length}_bytes`, 'relay_output');
+        } else if (msg.type === 'h264_chunk' && client_type === 'provider') {
+          session.broadcast_h264_chunk(msg);
+          log_state('h264_chunk_broadcasted', null, `${msg.data?.length || 0}_bytes_base64`, 'relay_h264');
         } else if (msg.type === 'input' && client_type === 'viewer') {
           const data = Buffer.from(msg.data, 'base64');
           session.relay_input_to_provider(data);

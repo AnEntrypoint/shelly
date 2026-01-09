@@ -255,6 +255,77 @@ function close_h264_video_stream() {
   log_session_state('h264_stream_closed_manual', {});
 }
 
+function init_h264_decoder() {
+  try {
+    // Create a hidden container for the decoder
+    let decoder_container = document.getElementById('h264-decoder-container');
+    if (!decoder_container) {
+      decoder_container = document.createElement('div');
+      decoder_container.id = 'h264-decoder-container';
+      decoder_container.style.display = 'none';
+      decoder_container.style.position = 'fixed';
+      decoder_container.style.width = '1024px';
+      decoder_container.style.height = '768px';
+      decoder_container.style.top = '0';
+      decoder_container.style.left = '0';
+      decoder_container.style.zIndex = '-10';
+      document.body.appendChild(decoder_container);
+    }
+
+    // Create hidden video element
+    let video = document.getElementById('h264-decoder-video');
+    if (video) {
+      video.remove();
+    }
+
+    video = document.createElement('video');
+    video.id = 'h264-decoder-video';
+    video.autoplay = true;
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.display = 'none';
+    decoder_container.appendChild(video);
+
+    // Initialize MediaSource API
+    const mediaSource = new MediaSource();
+    video.src = URL.createObjectURL(mediaSource);
+
+    return new Promise((resolve) => {
+      mediaSource.addEventListener('sourceopen', () => {
+        try {
+          let mimeType = 'video/mp4; codecs="avc1.42E01E"';
+          let sourceBuffer = null;
+
+          if (MediaSource.isTypeSupported(mimeType)) {
+            sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+          } else {
+            mimeType = 'video/mp4; codecs="avc1"';
+            if (MediaSource.isTypeSupported(mimeType)) {
+              sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            } else {
+              throw new Error(`H.264 MIME type not supported`);
+            }
+          }
+
+          const decoder = { sourceBuffer, mediaSource, video };
+          console.log('H.264 Decoder: Initialized for provider stream');
+          resolve(decoder);
+        } catch (err) {
+          console.error('H.264 Decoder: Initialization failed', err);
+          resolve(null);
+        }
+      }, { once: true });
+
+      mediaSource.addEventListener('error', (err) => {
+        console.error('H.264 Decoder: MediaSource error', err);
+      });
+    });
+  } catch (err) {
+    console.error('H.264 Decoder: Setup failed', err);
+    return Promise.resolve(null);
+  }
+}
+
 function init_vnc_tunnel() {
   if (!active_session_id) {
     alert('No active session');
@@ -1014,7 +1085,26 @@ async function connectToSession(session_id = null) {
           throw new Error('Unknown message format');
         }
 
-        if (session.term) {
+        if (msg.type === 'h264_chunk' && msg.data) {
+          const binaryString = atob(msg.data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          if (!h264_decoder) {
+            init_h264_decoder().then((decoder) => {
+              h264_decoder = decoder;
+              if (h264_decoder && h264_decoder.sourceBuffer && h264_decoder.sourceBuffer.updating === false) {
+                h264_decoder.sourceBuffer.appendBuffer(bytes);
+                console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
+              }
+            });
+          } else if (h264_decoder && h264_decoder.sourceBuffer && h264_decoder.sourceBuffer.updating === false) {
+            h264_decoder.sourceBuffer.appendBuffer(bytes);
+            console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
+          }
+        } else if (session.term) {
           if (msg.type === 'ready') {
             session.term.write('\r\n[Session ready]\r\n');
           } else if (msg.type === 'buffer' && msg.data) {
