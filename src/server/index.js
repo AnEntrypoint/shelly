@@ -146,13 +146,18 @@ app.get('/', (req, res) => {
 app.post('/api/session', (req, res) => {
   const auth_header = req.headers.authorization || '';
   const provided_token = auth_header.replace('Bearer ', '');
+  const request_password = req.body?.password || null;
 
-  if (provided_token !== SHELL_TOKEN) {
-    log_state('auth_failed', null, 'invalid_token', 'unauthorized_request');
+  // Allow authentication either by SHELL_TOKEN (for relay clients) or by providing a password (for CLI)
+  const auth_via_token = provided_token === SHELL_TOKEN;
+  const auth_via_password = request_password !== null;
+
+  if (!auth_via_token && !auth_via_password) {
+    log_state('auth_failed', null, 'no_auth_method', 'unauthorized_request');
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const password = req.body?.password || null;
+  const password = request_password;
   const session_id = uuid();
   const session = new ShellSession(session_id, password);
   sessions.set(session_id, session);
