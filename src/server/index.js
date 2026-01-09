@@ -80,6 +80,7 @@ class ShellSession {
     this.shell_provider_id = null;
     this.has_active_provider = false;
     this.is_active = true;
+    this.has_had_viewer_connection = false;
     this.viewport_buffer = [];
     this.viewport_cols = 120;
     this.viewport_rows = 30;
@@ -327,13 +328,13 @@ class VncTunnel {
 
 const vnc_tunnels = new Map();
 
-// Periodic cleanup of orphaned sessions (no provider and no clients for >30s)
+// Periodic cleanup of orphaned sessions (no provider and no clients for >30s, AND never had a viewer)
 setInterval(() => {
   const now = Date.now();
   const orphan_timeout = 30000; // 30 seconds
 
   for (const [session_id, session] of sessions) {
-    if (!session.has_active_provider && session.clients_connected.size === 0) {
+    if (!session.has_active_provider && session.clients_connected.size === 0 && !session.has_had_viewer_connection) {
       const age = now - session.created_at;
       if (age > orphan_timeout) {
         session.close();
@@ -485,6 +486,7 @@ wss.on('connection', (ws, req) => {
       log_state('shell_provider_connected', null, client_id, 'provider_connected');
       session.broadcast_log_event('shell_provider_connected', 'shell_provider_id', client_id);
     } else {
+      session.has_had_viewer_connection = true;
       log_state('viewer_connected', null, client_id, 'viewer_connected');
       session.broadcast_log_event('viewer_connected', 'client_id', client_id);
     }
