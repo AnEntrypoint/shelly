@@ -532,7 +532,6 @@ wss.on('connection', (ws, req) => {
         session.has_active_provider = false;
         log_state('shell_provider_disconnected', null, client_id, 'provider_closed');
         session.broadcast_log_event('shell_provider_disconnected', 'shell_provider_id', null);
-        session.close();
       } else {
         log_state('client_disconnected', null, client_id, 'ws_closed');
         session.broadcast_log_event('client_disconnected', 'client_id', client_id);
