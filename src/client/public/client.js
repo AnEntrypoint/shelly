@@ -1092,10 +1092,11 @@ async function connectToSession(session_id = null) {
       }
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
       try {
         let msg;
 
+        // Handle binary data (ArrayBuffer or Blob)
         if (event.data instanceof ArrayBuffer) {
           if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
           if (packer) {
@@ -1103,10 +1104,20 @@ async function connectToSession(session_id = null) {
           } else {
             throw new Error('Cannot unpack: Packr not available');
           }
+        } else if (event.data instanceof Blob) {
+          // Handle Blob type (WebSocket sends binary as Blob in some cases)
+          if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
+          if (packer) {
+            const arrayBuffer = await event.data.arrayBuffer();
+            msg = packer.unpack(new Uint8Array(arrayBuffer));
+          } else {
+            throw new Error('Cannot unpack: Packr not available');
+          }
         } else if (typeof event.data === 'string') {
           msg = JSON.parse(event.data);
         } else {
-          throw new Error('Unknown message format');
+          console.error('Unknown WebSocket data type:', typeof event.data, event.data?.constructor?.name);
+          throw new Error('Unknown message format: ' + (typeof event.data));
         }
 
         if (msg.type === 'h264_chunk' && msg.data) {
