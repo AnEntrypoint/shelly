@@ -77,15 +77,16 @@ async function poll_sessions() {
       }
     }
 
-    // Add tabs for new sessions
+    // Add tabs for new sessions (will auto-connect when clicked)
     for (const s of session_list) {
       if (!current_ids.has(s.id)) {
         add_session_tab(s.id, s.token);
         if (!active_session_id) {
           active_session_id = s.id;
+          // Auto-connect the first session when it appears
+          connectToSession(s.id);
         }
         log_session_state('session_auto_added', { session_id: s.id });
-        connectToSession(s.id);
       }
     }
 
@@ -325,18 +326,24 @@ function switch_to_tab(session_id) {
   if (term_div) term_div.style.display = 'block';
 
   const session = sessions.get(session_id);
-  if (session.term) {
-    try {
-      session.fitAddon.fit();
-      session.term.focus();
-    } catch (err) {
-      console.error('Tab switch error:', err);
-    }
-  }
 
-  update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
-  if (session.is_connected) {
-    document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+  // Auto-connect if terminal not yet initialized
+  if (!session.term) {
+    connectToSession(session_id);
+  } else {
+    if (session.term) {
+      try {
+        session.fitAddon.fit();
+        session.term.focus();
+      } catch (err) {
+        console.error('Tab switch error:', err);
+      }
+    }
+
+    update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
+    if (session.is_connected) {
+      document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+    }
   }
 
   log_session_state('switched_to_tab', { prev: prev_active, current: session_id });
