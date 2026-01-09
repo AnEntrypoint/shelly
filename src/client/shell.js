@@ -152,49 +152,55 @@ class PersistentSession {
   }
 
   start_input_loop() {
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: true
-    });
+    const has_tty = process.stdin.isTTY;
 
-    const handle_line = (line) => {
-      if (line === '.exit') {
-        log_state('cli_exit_requested', null, true, 'user_exit');
-        this.rl.close();
-        this.ws.close();
-        process.exit(0);
-      }
-      this.send_input(line + '\n');
-    };
+    if (has_tty) {
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: true
+      });
 
-    const handle_stdin = (chunk) => {
-      this.send_input(chunk.toString());
-    };
+      const handle_line = (line) => {
+        if (line === '.exit') {
+          log_state('cli_exit_requested', null, true, 'user_exit');
+          this.rl.close();
+          this.ws.close();
+          process.exit(0);
+        }
+        this.send_input(line + '\n');
+      };
 
-    const handle_resize = () => {
-      if (process.stdout.isTTY) {
-        const cols = process.stdout.columns || 120;
-        const rows = process.stdout.rows || 30;
-        this.resize(cols, rows);
-        log_state('terminal_resized', null, `${cols}x${rows}`, 'sigwinch');
-      }
-    };
+      const handle_resize = () => {
+        if (process.stdout.isTTY) {
+          const cols = process.stdout.columns || 120;
+          const rows = process.stdout.rows || 30;
+          this.resize(cols, rows);
+          log_state('terminal_resized', null, `${cols}x${rows}`, 'sigwinch');
+        }
+      };
 
-    if (process.stdin.isTTY) {
       this.rl.on('line', handle_line);
+      process.on('SIGWINCH', handle_resize);
+
+      this.rl.on('close', () => {
+        if (this.ws) {
+          this.ws.close();
+        }
+        process.exit(0);
+      });
     } else {
+      const handle_stdin = (chunk) => {
+        this.send_input(chunk.toString());
+      };
+
+      const handle_close = () => {
+        log_state('stdin_closed', null, true, 'pipe_closed');
+      };
+
       process.stdin.on('data', handle_stdin);
+      process.stdin.on('end', handle_close);
     }
-
-    process.on('SIGWINCH', handle_resize);
-
-    this.rl.on('close', () => {
-      if (this.ws) {
-        this.ws.close();
-      }
-      process.exit(0);
-    });
   }
 
   close() {
