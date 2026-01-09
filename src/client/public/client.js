@@ -617,7 +617,14 @@ function init_terminal_for_session(session_id) {
     term_elem.setAttribute('autocomplete', 'off');
     term_elem.setAttribute('spellcheck', 'false');
 
-    term.open(term_elem);
+    try {
+      term.open(term_elem);
+      console.log('XTERM_OPENED_SUCCESS', { session_id, term_exists: !!term, elem_id: term_elem.id, has_textarea: !!document.querySelector('.xterm-helper-textarea') });
+    } catch (open_err) {
+      console.error('XTERM_OPEN_FAILED', { session_id, error: open_err.message, stack: open_err.stack });
+      log_session_state('terminal_init_error', { session_id, reason: 'xterm_open_failed', error: open_err.message });
+      return false;
+    }
 
     term.attachCustomKeyEventHandler((arg) => {
       if (arg.type === 'keydown') {
@@ -643,29 +650,47 @@ function init_terminal_for_session(session_id) {
     }, 100);
 
     const session = sessions.get(session_id);
+
     term.onData((data) => {
+      // DIAGNOSTIC: Log every input event with exact state
+      console.log('INPUT_EVENT', {
+        session_id,
+        data_length: data.length,
+        data_preview: data.substring(0, 50),
+        session_exists: !!session,
+        ws_exists: !!(session && session.ws),
+        ws_readyState: session?.ws?.readyState,
+        ws_OPEN: WebSocket.OPEN,
+        ws_CLOSED: WebSocket.CLOSED,
+        ws_CLOSING: WebSocket.CLOSING,
+        session_is_connected: session?.is_connected,
+        all_guards_pass: !!(session && session.ws &&
+          session.ws.readyState === WebSocket.OPEN &&
+          session.is_connected)
+      });
+
       if (!session || !session.ws) {
         set_message('Session error: WebSocket not available', true);
-        log_session_state('input_error_no_ws', { session_id, reason: 'ws_missing' });
+        log_session_state('input_error_no_ws', { session_id, reason: 'ws_missing', session_exists: !!session, ws_exists: !!(session?.ws) });
         return;
       }
 
       if (session.ws.readyState === WebSocket.CLOSED || session.ws.readyState === WebSocket.CLOSING) {
         set_message('Connection lost. Attempting to reconnect...', false);
-        log_session_state('input_ws_closed', { session_id, readyState: session.ws.readyState });
+        log_session_state('input_ws_closed', { session_id, readyState: session.ws.readyState, CLOSED: WebSocket.CLOSED, CLOSING: WebSocket.CLOSING });
         connectToSession(session_id);
         return;
       }
 
       if (session.ws.readyState !== WebSocket.OPEN) {
         set_message('Connecting...', false);
-        log_session_state('input_ws_not_ready', { session_id, readyState: session.ws.readyState });
+        log_session_state('input_ws_not_ready', { session_id, readyState: session.ws.readyState, expected_OPEN: WebSocket.OPEN });
         return;
       }
 
       if (!session.is_connected) {
         set_message('Reconnecting...', false);
-        log_session_state('input_session_not_connected', { session_id });
+        log_session_state('input_session_not_connected', { session_id, is_connected: session.is_connected });
         connectToSession(session_id);
         return;
       }
