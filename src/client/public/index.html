@@ -252,8 +252,8 @@
   <div id="password-modal" class="modal active">
     <div class="modal-content">
       <div class="modal-title">Enter Password</div>
-      <input type="password" id="password-input" class="modal-input" placeholder="Session password" autocomplete="off">
-      <button id="password-submit" class="modal-button">Connect</button>
+      <input type="password" id="password-input" class="modal-input" placeholder="Session password" autocomplete="off" onkeypress="if(event.key==='Enter') handle_password_submit();">
+      <button id="password-submit" class="modal-button" onclick="handle_password_submit()">Connect</button>
       <div id="sessions-list" class="sessions-list"></div>
       <div id="modal-message" style="font-size: 12px; color: #858585; margin-top: 12px; text-align: center;"></div>
     </div>

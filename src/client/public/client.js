@@ -53,7 +53,11 @@ function select_session(session_id, token) {
   params.set('token', token);
   params.set('type', 'viewer');
 
-  window.location.search = params.toString();
+  const new_url = '?' + params.toString();
+  window.history.pushState({}, '', new_url);
+
+  document.getElementById('password-modal').classList.remove('active');
+  connectToSession();
 }
 
 async function handle_password_submit() {
