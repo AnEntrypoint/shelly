@@ -232,7 +232,11 @@ function init_terminal_for_session(session_id) {
     term_elem.setAttribute('spellcheck', 'false');
 
     term.open(term_elem);
-    fitAddon.fit();
+
+    // Defer fit() until next animation frame to ensure DOM layout is current
+    requestAnimationFrame(() => {
+      fitAddon.fit();
+    });
 
     const session = sessions.get(session_id);
     term.onData((data) => {
@@ -331,13 +335,16 @@ function switch_to_tab(session_id) {
   if (!session.term) {
     connectToSession(session_id);
   } else {
-    if (session.term) {
-      try {
-        session.fitAddon.fit();
-        session.term.focus();
-      } catch (err) {
-        console.error('Tab switch error:', err);
-      }
+    if (session.term && session.fitAddon) {
+      // Use requestAnimationFrame to ensure DOM layout is current before fitting
+      requestAnimationFrame(() => {
+        try {
+          session.fitAddon.fit();
+          session.term.focus();
+        } catch (err) {
+          console.error('Tab switch error:', err);
+        }
+      });
     }
 
     update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
@@ -390,14 +397,18 @@ async function connectToSession(session_id = null) {
     ws.onopen = () => {
       session.is_connected = true;
       session.ws = ws;
-      update_status('connected', true);
-      document.getElementById('session-info').style.display = 'flex';
-      document.getElementById('session-id').textContent = `Session: ${sid.substring(0, 8)}...`;
-      document.getElementById('connect-btn').disabled = true;
-      document.getElementById('disconnect-btn').disabled = false;
-      set_message('Connected. Type to interact.');
-      if (session.term) session.term.focus();
       log_session_state('websocket_connected', { session_id: sid });
+
+      // Only update UI if this is the currently active session
+      if (active_session_id === sid) {
+        update_status('connected', true);
+        document.getElementById('session-info').style.display = 'flex';
+        document.getElementById('session-id').textContent = `Session: ${sid.substring(0, 8)}...`;
+        document.getElementById('connect-btn').disabled = true;
+        document.getElementById('disconnect-btn').disabled = false;
+        set_message('Connected. Type to interact.');
+        if (session.term) session.term.focus();
+      }
     };
 
     ws.onmessage = (event) => {
