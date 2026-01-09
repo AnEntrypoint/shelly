@@ -191,6 +191,7 @@ async function connectToSession() {
       is_connected = true;
       current_session = params.session_id;
       update_status('connected', true);
+      document.getElementById('password-modal').classList.remove('active');
       document.getElementById('session-info').style.display = 'flex';
       document.getElementById('session-id').textContent = `Session: ${params.session_id.substring(0, 8)}...`;
       document.getElementById('connect-btn').disabled = true;
