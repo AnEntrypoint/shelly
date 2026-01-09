@@ -373,13 +373,21 @@ async function fetch_sessions_by_password(password) {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch sessions');
+      log_session_state('fetch_sessions_http_error', { status: response.status });
+      throw new Error(`HTTP ${response.status}: Failed to fetch sessions`);
     }
 
     const data = await response.json();
-    return data.sessions || [];
+    if (!Array.isArray(data.sessions)) {
+      log_session_state('fetch_sessions_invalid_response', { response_keys: Object.keys(data) });
+      throw new Error('Invalid response format: sessions is not an array');
+    }
+
+    log_session_state('fetch_sessions_success', { count: data.sessions.length });
+    return data.sessions;
   } catch (err) {
     console.error('Fetch sessions error:', err);
+    log_session_state('fetch_sessions_error', { error: err.message });
     return [];
   }
 }
@@ -388,23 +396,35 @@ function open_all_sessions(session_list) {
   log_session_state('opening_all_sessions', { count: session_list.length });
 
   if (session_list.length === 0) {
-    document.getElementById('modal-message').textContent = 'No active sessions found';
+    const msg = 'No active sessions found. Ensure a shell provider is connected.';
+    document.getElementById('modal-message').textContent = msg;
     document.getElementById('tabs-bar').style.display = 'none';
+    log_session_state('no_sessions_available', { reason: 'empty_list' });
     return;
   }
 
+  let successful_tabs = 0;
   session_list.forEach((s, index) => {
-    add_session_tab(s.id, s.token);
-    if (index === 0) {
-      active_session_id = s.id;
+    if (add_session_tab(s.id, s.token)) {
+      successful_tabs++;
+      if (successful_tabs === 1) {
+        active_session_id = s.id;
+      }
     }
   });
+
+  if (successful_tabs === 0) {
+    const msg = 'Failed to create terminal tabs. Check browser console.';
+    document.getElementById('modal-message').textContent = msg;
+    log_session_state('tab_creation_failed', { attempted: session_list.length });
+    return;
+  }
 
   if (sessions.size > 0) {
     document.getElementById('password-modal').classList.remove('active');
     document.getElementById('tabs-bar').style.display = 'flex';
     switch_to_tab(active_session_id);
-    log_session_state('all_sessions_opened', { active: active_session_id });
+    log_session_state('all_sessions_opened', { active: active_session_id, tab_count: sessions.size });
   }
 }
 
@@ -624,14 +644,40 @@ function init_terminal_for_session(session_id) {
 
     const session = sessions.get(session_id);
     term.onData((data) => {
-      if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
-        if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
+      if (!session || !session.ws) {
+        set_message('Session error: WebSocket not available', true);
+        log_session_state('input_error_no_ws', { session_id, reason: 'ws_missing' });
+        return;
+      }
 
-        const msg = {
-          type: 'input',
-          data: btoa(data)
-        };
+      if (session.ws.readyState === WebSocket.CLOSED || session.ws.readyState === WebSocket.CLOSING) {
+        set_message('Connection lost. Attempting to reconnect...', false);
+        log_session_state('input_ws_closed', { session_id, readyState: session.ws.readyState });
+        connectToSession(session_id);
+        return;
+      }
 
+      if (session.ws.readyState !== WebSocket.OPEN) {
+        set_message('Connecting...', false);
+        log_session_state('input_ws_not_ready', { session_id, readyState: session.ws.readyState });
+        return;
+      }
+
+      if (!session.is_connected) {
+        set_message('Reconnecting...', false);
+        log_session_state('input_session_not_connected', { session_id });
+        connectToSession(session_id);
+        return;
+      }
+
+      if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
+
+      const msg = {
+        type: 'input',
+        data: btoa(data)
+      };
+
+      try {
         if (packer) {
           try {
             const packed = packer.pack(msg);
@@ -642,6 +688,10 @@ function init_terminal_for_session(session_id) {
         } else {
           session.ws.send(JSON.stringify(msg));
         }
+        log_session_state('input_sent', { session_id, bytes: data.length });
+      } catch (err) {
+        log_session_state('input_send_error', { session_id, error: err.message });
+        set_message('Failed to send input', true);
       }
     });
 
@@ -676,33 +726,53 @@ function init_terminal_for_session(session_id) {
 function add_session_tab(session_id, token) {
   if (sessions.has(session_id)) {
     log_session_state('duplicate_session_ignored', { session_id });
-    return;
+    return false;
   }
 
-  sessions.set(session_id, {
-    id: session_id,
-    token,
-    term: null,
-    fitAddon: null,
-    ws: null,
-    is_connected: false
-  });
+  try {
+    sessions.set(session_id, {
+      id: session_id,
+      token,
+      term: null,
+      fitAddon: null,
+      ws: null,
+      is_connected: false
+    });
 
-  const tab_bar = document.getElementById('tabs-bar');
-  const tab = document.createElement('div');
-  tab.className = 'tab';
-  tab.id = `tab-${session_id}`;
-  tab.textContent = session_id.substring(0, 8);
-  tab.onclick = () => switch_to_tab(session_id);
-  tab_bar.appendChild(tab);
+    const tab_bar = document.getElementById('tabs-bar');
+    if (!tab_bar) {
+      log_session_state('tab_bar_not_found', { session_id });
+      sessions.delete(session_id);
+      return false;
+    }
 
-  const terminals_container = document.getElementById('terminals');
-  const term_div = document.createElement('div');
-  term_div.id = `terminal-${session_id}`;
-  term_div.className = 'terminal-instance';
-  terminals_container.appendChild(term_div);
+    const tab = document.createElement('div');
+    tab.className = 'tab';
+    tab.id = `tab-${session_id}`;
+    tab.textContent = session_id.substring(0, 8);
+    tab.onclick = () => switch_to_tab(session_id);
+    tab_bar.appendChild(tab);
 
-  log_session_state('session_tab_added', { session_id });
+    const terminals_container = document.getElementById('terminals');
+    if (!terminals_container) {
+      log_session_state('terminals_container_not_found', { session_id });
+      tab.remove();
+      sessions.delete(session_id);
+      return false;
+    }
+
+    const term_div = document.createElement('div');
+    term_div.id = `terminal-${session_id}`;
+    term_div.className = 'terminal-instance';
+    terminals_container.appendChild(term_div);
+
+    log_session_state('session_tab_added', { session_id });
+    return true;
+  } catch (err) {
+    log_session_state('tab_creation_error', { session_id, error: err.message });
+    sessions.delete(session_id);
+    return false;
+  }
 }
 
 function switch_to_tab(session_id) {
@@ -810,6 +880,10 @@ async function connectToSession(session_id = null) {
       session.ws = ws;
       log_session_state('websocket_connected', { session_id: sid });
 
+      if (session.term) {
+        session.term.write('\r\n[Connected to session]\r\n');
+      }
+
       // Only update UI if this is the currently active session
       if (active_session_id === sid) {
         update_status('connected', true);
@@ -819,7 +893,13 @@ async function connectToSession(session_id = null) {
         document.getElementById('disconnect-btn').disabled = false;
         document.getElementById('vnc-button').disabled = false;
         set_message('Connected. Type to interact.');
-        if (session.term) session.term.focus();
+        if (session.term) {
+          session.term.focus();
+          const proposed = session.fitAddon?.proposeDimensions?.();
+          if (proposed && proposed.cols > 0 && proposed.rows > 0) {
+            session.term.write(`[Terminal ${proposed.cols}x${proposed.rows}]\r\n`);
+          }
+        }
       }
     };
 
@@ -873,14 +953,24 @@ async function connectToSession(session_id = null) {
 
     ws.onerror = (err) => {
       console.error('WebSocket error:', err);
-      set_message('Connection error', true);
       session.is_connected = false;
       update_status('disconnected', false);
-      log_session_state('websocket_error', { session_id: sid, error: err.message });
+      if (session.term) {
+        session.term.write('\r\n[Connection error - attempting to reconnect]\r\n');
+      }
+      set_message('Connection error. Retrying...', true);
+      log_session_state('websocket_error', { session_id: sid, error: err?.message || 'unknown' });
+
+      setTimeout(() => {
+        if (!session.is_connected && session.term) {
+          connectToSession(sid);
+        }
+      }, 2000);
     };
 
   } catch (err) {
-    set_message(`Error: ${err.message}`, true);
+    session.is_connected = false;
+    set_message(`Connection error: ${err.message}`, true);
     console.error('Connect error:', err);
     log_session_state('connect_error', { session_id: sid, error: err.message });
   }
