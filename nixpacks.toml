@@ -1,9 +1,9 @@
-[phases.setup]
-aptPkgs = ["build-essential", "python3", "python3-dev", "pkg-config"]
+[providers]
+nodejs = "22"
+python = "3.11"
 
-[phases.install]
-dependsOn = ["setup"]
-cmds = ["npm install", "npm rebuild node-pty"]
+[build]
+cmds = ["npm install --verbose", "npm rebuild node-pty --verbose"]
 
 [start]
 cmd = "node src/server/index.js"
