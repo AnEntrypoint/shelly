@@ -5,7 +5,5 @@ cmd = "npm install"
 cmd = "node src/server/index.js"
 port = 3000
 
-[[providers]]
-name = "nodejs"
-match = { files = ["package.json"] }
+[providers.nodejs]
 nodeVersion = "22"
