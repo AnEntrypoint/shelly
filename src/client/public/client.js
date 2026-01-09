@@ -666,13 +666,15 @@ function init_terminal_for_session(session_id) {
         return;
       }
 
-      try {
-        if (session.term) {
-          session.term.write(data);
-        }
-      } catch (err) {
-        // Silently ignore write errors
-      }
+      // IMPORTANT: Don't write user input back to terminal in a relay scenario
+      // The server will echo it back. Writing it here causes feedback loops and breaks xterm's input system
+      // try {
+      //   if (session.term) {
+      //     session.term.write(data);
+      //   }
+      // } catch (err) {
+      //   // Silently ignore write errors
+      // }
 
       if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
@@ -699,6 +701,22 @@ function init_terminal_for_session(session_id) {
     };
 
     term.onData((data) => send_terminal_input(data));
+
+    // Fallback: Listen directly to the xterm textarea for keyboard input
+    // This handles cases where xterm's onData doesn't fire
+    setTimeout(() => {
+      const textarea = document.querySelector('.xterm-helper-textarea');
+      if (textarea) {
+        textarea.addEventListener('paste', (e) => {
+          const pasted_text = (e.clipboardData || window.clipboardData).getData('text');
+          if (pasted_text) {
+            send_terminal_input(pasted_text);
+            e.preventDefault();
+          }
+        });
+        console.log('TEXTAREA_PASTE_LISTENER_ADDED', { session_id });
+      }
+    }, 50);
 
     const fit_to_viewport = () => {
       try {
