@@ -8,7 +8,6 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-const SHELL_TOKEN = process.env.SHELL_TOKEN || crypto.randomBytes(32).toString('hex');
 
 const sessions = new Map();
 const clients = new Map();
@@ -144,82 +143,30 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/session', (req, res) => {
-  const auth_header = req.headers.authorization || '';
-  const provided_token = auth_header.replace('Bearer ', '');
-  const request_password = req.body?.password || null;
+  const password = req.body?.password;
 
-  // Allow authentication either by SHELL_TOKEN (for relay clients) or by providing a password (for CLI)
-  const auth_via_token = provided_token === SHELL_TOKEN;
-  const auth_via_password = request_password !== null;
-
-  if (!auth_via_token && !auth_via_password) {
-    log_state('auth_failed', null, 'no_auth_method', 'unauthorized_request');
-    return res.status(401).json({ error: 'unauthorized' });
+  if (!password) {
+    return res.status(400).json({ error: 'password_required' });
   }
 
-  const password = request_password;
   const session_id = uuid();
   const session = new ShellSession(session_id, password);
   sessions.set(session_id, session);
 
-  if (password) {
-    const password_hash = hash_password(password);
-    if (!password_groups.has(password_hash)) {
-      password_groups.set(password_hash, []);
-    }
-    password_groups.get(password_hash).push(session_id);
-    log_state('session_created_http', null, session_id, 'password_group_session');
-  } else {
-    log_state('session_created_http', null, session_id, 'relay_session_created');
+  const password_hash = hash_password(password);
+  if (!password_groups.has(password_hash)) {
+    password_groups.set(password_hash, []);
   }
+  password_groups.get(password_hash).push(session_id);
+
+  log_state('session_created_password', null, session_id, 'new_session');
 
   res.json({
     session_id,
-    token: session.token,
-    shell_token: SHELL_TOKEN
+    token: session.token
   });
 });
 
-app.get('/api/session/:session_id', (req, res) => {
-  const auth_header = req.headers.authorization || '';
-  const provided_token = auth_header.replace('Bearer ', '');
-
-  if (provided_token !== SHELL_TOKEN) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-
-  const session = sessions.get(req.params.session_id);
-  if (!session) {
-    return res.status(404).json({ error: 'session_not_found' });
-  }
-
-  res.json({
-    session_id: session.id,
-    is_active: session.is_active,
-    clients: session.clients_connected.size,
-    created_at: session.created_at
-  });
-});
-
-app.get('/api/sessions', (req, res) => {
-  const auth_header = req.headers.authorization || '';
-  const provided_token = auth_header.replace('Bearer ', '');
-
-  if (provided_token !== SHELL_TOKEN) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-
-  const sessions_list = Array.from(sessions.values()).map(s => ({
-    id: s.id,
-    is_active: s.is_active,
-    clients: s.clients_connected.size,
-    created_at: s.created_at,
-    uptime_ms: Date.now() - s.created_at
-  }));
-
-  log_state('sessions_list_requested', null, sessions_list.length, 'api_list');
-  res.json({ sessions: sessions_list });
-});
 
 app.post('/api/sessions/by-password', (req, res) => {
   const password = req.body?.password;
@@ -327,7 +274,7 @@ wss.on('connection', (ws, req) => {
 
 server.listen(PORT, () => {
   console.log(`shell server running on port ${PORT}`);
-  console.log(`auth token: ${SHELL_TOKEN}`);
+  console.log(`authentication: password-based (no shell token required)`);
 });
 
 export { ShellSession, sessions, clients };
