@@ -3,7 +3,7 @@ aptPkgs = ["build-essential", "python3", "python3-dev", "pkg-config"]
 
 [phases.install]
 dependsOn = ["setup"]
-cmds = ["npm install"]
+cmds = ["npm install", "npm rebuild node-pty"]
 
 [start]
 cmd = "node src/server/index.js"
