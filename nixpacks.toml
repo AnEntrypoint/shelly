@@ -1,11 +1,7 @@
-[[providers]]
-name = "nodejs"
-
-[[providers]]
-name = "python"
+providers = ["...", "node", "python"]
 
 [build]
-cmds = ["npm install --verbose", "npm rebuild node-pty --verbose"]
+cmds = ["npm install", "npm rebuild node-pty"]
 
 [start]
 cmd = "node src/server/index.js"
