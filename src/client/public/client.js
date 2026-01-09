@@ -21,7 +21,8 @@ let polling_interval = null;
 let vnc_rfb = null;
 let vnc_tunnel_ws = null;
 let h264_video_ws = null;
-let h264_decoder = null;
+let h264_decoder_terminal = null;
+let h264_decoder_vnc = null;
 let packer = null;
 
 const USER_FACING_LOG_EVENTS = new Set([
@@ -110,7 +111,7 @@ function init_h264_video_stream() {
             });
             init_h264_video_player(msg.width, msg.height);
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            if (h264_decoder && h264_decoder.sourceBuffer) {
+            if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer) {
               try {
                 // Decode base64 to binary and convert to Uint8Array for MediaSource
                 const binaryString = atob(msg.data);
@@ -119,8 +120,8 @@ function init_h264_video_stream() {
                   bytes[i] = binaryString.charCodeAt(i);
                 }
 
-                if (h264_decoder.sourceBuffer.updating === false) {
-                  h264_decoder.sourceBuffer.appendBuffer(bytes);
+                if (h264_decoder_vnc.sourceBuffer.updating === false) {
+                  h264_decoder_vnc.sourceBuffer.appendBuffer(bytes);
                   console.log('H.264 Stream: Appended', bytes.length, 'bytes');
                 }
               } catch (append_err) {
@@ -205,7 +206,7 @@ function init_h264_video_player(width, height) {
           }
         }
 
-        h264_decoder = { sourceBuffer, mediaSource, video };
+        h264_decoder_vnc = { sourceBuffer, mediaSource, video };
 
         console.log('H.264 Video: Native MediaSource initialized with fragmented MP4');
         log_session_state('h264_decoder_initialized', {
@@ -237,18 +238,18 @@ function close_h264_video_stream() {
     h264_video_ws.close();
     h264_video_ws = null;
   }
-  if (h264_decoder) {
-    if (h264_decoder.mediaSource && h264_decoder.mediaSource.readyState === 'open') {
+  if (h264_decoder_vnc) {
+    if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
       try {
-        h264_decoder.mediaSource.endOfStream();
+        h264_decoder_vnc.mediaSource.endOfStream();
       } catch (err) {
         // Silently ignore if already ended
       }
     }
-    if (h264_decoder.video && h264_decoder.video.src) {
-      URL.revokeObjectURL(h264_decoder.video.src);
+    if (h264_decoder_vnc.video && h264_decoder_vnc.video.src) {
+      URL.revokeObjectURL(h264_decoder_vnc.video.src);
     }
-    h264_decoder = null;
+    h264_decoder_vnc = null;
   }
   const viewer = document.getElementById('vnc-viewer');
   if (viewer) viewer.innerHTML = '';
@@ -1128,7 +1129,7 @@ async function connectToSession(session_id = null) {
         }
 
         if (msg.type === 'h264_chunk' && msg.data) {
-          console.log('H.264 Chunk received from provider:', { chunk_len: msg.data?.length, decoder_ready: !!h264_decoder });
+          console.log('H.264 Chunk received from provider:', { chunk_len: msg.data?.length, decoder_ready: !!h264_decoder_terminal });
 
           const binaryString = atob(msg.data);
           const bytes = new Uint8Array(binaryString.length);
@@ -1136,16 +1137,16 @@ async function connectToSession(session_id = null) {
             bytes[i] = binaryString.charCodeAt(i);
           }
 
-          if (!h264_decoder) {
+          if (!h264_decoder_terminal) {
             console.log('H.264 Decoder not ready, initializing...');
             init_h264_decoder().then((decoder) => {
               console.log('H.264 Decoder initialized:', !!decoder);
-              h264_decoder = decoder;
-              if (h264_decoder && h264_decoder.sourceBuffer) {
-                console.log('SourceBuffer ready, updating:', h264_decoder.sourceBuffer.updating);
-                if (h264_decoder.sourceBuffer.updating === false) {
+              h264_decoder_terminal = decoder;
+              if (h264_decoder_terminal && h264_decoder_terminal.sourceBuffer) {
+                console.log('SourceBuffer ready, updating:', h264_decoder_terminal.sourceBuffer.updating);
+                if (h264_decoder_terminal.sourceBuffer.updating === false) {
                   try {
-                    h264_decoder.sourceBuffer.appendBuffer(bytes);
+                    h264_decoder_terminal.sourceBuffer.appendBuffer(bytes);
                     console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
                   } catch (err) {
                     console.error('H.264 SourceBuffer append failed:', err);
@@ -1159,11 +1160,11 @@ async function connectToSession(session_id = null) {
             }).catch(err => {
               console.error('H.264 Decoder init failed:', err);
             });
-          } else if (h264_decoder && h264_decoder.sourceBuffer) {
-            console.log('H.264 SourceBuffer appending, updating:', h264_decoder.sourceBuffer.updating);
-            if (h264_decoder.sourceBuffer.updating === false) {
+          } else if (h264_decoder_terminal && h264_decoder_terminal.sourceBuffer) {
+            console.log('H.264 SourceBuffer appending, updating:', h264_decoder_terminal.sourceBuffer.updating);
+            if (h264_decoder_terminal.sourceBuffer.updating === false) {
               try {
-                h264_decoder.sourceBuffer.appendBuffer(bytes);
+                h264_decoder_terminal.sourceBuffer.appendBuffer(bytes);
                 console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
               } catch (err) {
                 console.error('H.264 SourceBuffer append failed:', err);
