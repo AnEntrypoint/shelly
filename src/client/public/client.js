@@ -722,6 +722,9 @@ function init_terminal_for_session(session_id) {
     setTimeout(() => {
       const textarea = document.querySelector('.xterm-helper-textarea');
       if (textarea) {
+        let last_value = '';
+
+        // Listen for paste events
         textarea.addEventListener('paste', (e) => {
           const pasted_text = (e.clipboardData || window.clipboardData).getData('text');
           if (pasted_text) {
@@ -729,7 +732,27 @@ function init_terminal_for_session(session_id) {
             e.preventDefault();
           }
         });
-        console.log('TEXTAREA_PASTE_LISTENER_ADDED', { session_id });
+
+        // Listen for text input changes (includes typed characters and deletion)
+        textarea.addEventListener('input', (e) => {
+          const current_value = textarea.value;
+          const new_text = current_value.substring(last_value.length);
+
+          if (new_text) {
+            // User typed new characters
+            send_terminal_input(new_text);
+          } else if (current_value.length < last_value.length) {
+            // User deleted characters (backspace)
+            const deleted_count = last_value.length - current_value.length;
+            for (let i = 0; i < deleted_count; i++) {
+              send_terminal_input('\x7f'); // DEL character
+            }
+          }
+
+          last_value = current_value;
+        });
+
+        console.log('TEXTAREA_INPUT_LISTENER_ADDED', { session_id });
       }
     }, 50);
 
