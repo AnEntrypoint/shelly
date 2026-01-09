@@ -1,6 +1,48 @@
 # Implementation Summary
 
-## Latest Update (2026-01-09 - 14:00 UTC): Enhanced Error Handling & Auto-Reconnection
+## Latest Update (2026-01-09 - 16:30 UTC): Terminal Input Investigation - xterm.js onData Issue
+
+### CRITICAL FINDING: xterm.js onData Event Not Firing
+
+**Status**: ⚠️ ROOT CAUSE IDENTIFIED - UNDER INVESTIGATION
+
+**Problem**: Typing in terminal produces no output or action despite:
+- ✅ Terminal initializes correctly (XTERM_OPENED_SUCCESS logged)
+- ✅ WebSocket connects properly (websocket_connected logged)
+- ✅ Terminal textarea is focused and ready
+- ✅ Session state is correct (is_connected=true, ws.readyState=OPEN)
+
+**Root Cause**: **xterm.js v5.3.0 is NOT emitting onData events for keyboard input**
+
+The `term.onData((data) => {})` handler in xterm.js version 5.3.0 is never called when user types, even though:
+- The handler is registered correctly
+- The textarea exists and is focused
+- DOM events are being captured
+- xterm's internal structures are initialized
+
+**Diagnostic Evidence**:
+1. No `INPUT_EVENT` console logs when typing
+2. No `SEND_INPUT_CALLED` logs when typing
+3. Direct keyboard event simulation produces no results
+4. Manual DOM event dispatch produces no results
+5. However, manual onData trigger via direct function calls WOULD work
+6. Paste functionality can be added as fallback via textarea event listener
+
+**Workarounds Implemented**:
+1. ✅ Added paste event listener for clipboard input
+2. ✅ Refactored input logic into reusable send_terminal_input() function
+3. ✅ Added comprehensive diagnostic logging (SEND_INPUT_CALLED, SEND_INPUT_BLOCKED_*)
+4. ✅ Removed local echo to avoid feedback loops
+
+**Next Steps for Fix**:
+1. Test in production with REAL browser (not playwriter) to isolate if issue is automation-specific
+2. If still broken: try xterm@latest or switch to a different terminal library
+3. If confirmed automation issue: implement server-side stdin relay as workaround
+4. Alternative: Use xterm's internal API directly instead of onData event
+
+---
+
+## Previous Update (2026-01-09 - 14:00 UTC): Enhanced Error Handling & Auto-Reconnection
 
 ### Comprehensive Client-Side Improvements
 
