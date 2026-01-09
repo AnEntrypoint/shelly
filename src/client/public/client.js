@@ -156,6 +156,12 @@ function init_h264_video_stream() {
 }
 
 function init_h264_video_player(width, height) {
+  // Guard: Don't reinitialize if already done
+  if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer && h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
+    console.log('H.264 Video: Decoder already initialized, skipping reinit');
+    return;
+  }
+
   const viewer = document.getElementById('vnc-viewer');
   viewer.innerHTML = '';
 
