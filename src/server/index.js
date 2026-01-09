@@ -124,12 +124,17 @@ class ShellSession {
       if (client_id === exclude_client_id) continue;
       const client = clients.get(client_id);
       if (client && client.ws && client.ws.readyState === 1) {
-        client.ws.send(JSON.stringify({
-          type: 'output',
-          data: data ? Buffer.from(data).toString('base64') : null,
-          session_id: this.id,
-          timestamp: Date.now()
-        }));
+        try {
+          const msg = pack.pack({
+            type: 'output',
+            data: data ? Buffer.from(data).toString('base64') : null,
+            session_id: this.id,
+            timestamp: Date.now()
+          });
+          client.ws.send(msg);
+        } catch (err) {
+          log_state('broadcast_pack_error', null, err.message, 'pack_failed');
+        }
       }
     }
   }
@@ -154,12 +159,18 @@ class ShellSession {
     if (!this.shell_provider_id) return false;
     const provider = clients.get(this.shell_provider_id);
     if (provider && provider.ws && provider.ws.readyState === 1) {
-      provider.ws.send(JSON.stringify({
-        type: 'relay_input',
-        data: data ? Buffer.from(data).toString('base64') : null,
-        session_id: this.id,
-        timestamp: Date.now()
-      }));
+      try {
+        const msg = pack.pack({
+          type: 'relay_input',
+          data: data ? Buffer.from(data).toString('base64') : null,
+          session_id: this.id,
+          timestamp: Date.now()
+        });
+        provider.ws.send(msg);
+      } catch (err) {
+        log_state('input_relay_pack_error', null, err.message, 'pack_failed');
+        return false;
+      }
       log_state('input_relayed', null, `${data.length}_bytes`, 'relay_to_provider');
       return true;
     }
