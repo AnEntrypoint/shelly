@@ -214,24 +214,19 @@ async function run_cli() {
 
   if (command === 'new') {
     const server_url = args[1] || 'http://localhost:3000';
-    const shell_token = args[2];
-    const password = args[3] || null;
+    const password = args[2];
 
-    if (!shell_token) {
-      console.error('usage: node cli.js new [server_url] <shell_token> [password]');
+    if (!password) {
+      console.error('usage: npm run cli -- new <server_url> <password>');
       process.exit(1);
     }
 
     try {
-      const body = {};
-      if (password) {
-        body.password = password;
-      }
+      const body = { password };
 
       const fetch_response = await fetch(`${server_url}/api/session`, {
         method: 'POST',
         headers: {
-          'authorization': `Bearer ${shell_token}`,
           'content-type': 'application/json'
         },
         body: JSON.stringify(body)
@@ -245,7 +240,7 @@ async function run_cli() {
       const session = new PersistentSession({
         session_id: session_data.session_id,
         token: session_data.token,
-        shell_token: session_data.shell_token,
+        shell_token: password,
         server_url
       });
 
