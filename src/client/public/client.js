@@ -281,9 +281,19 @@ function init_h264_decoder() {
     video = document.createElement('video');
     video.id = 'h264-decoder-video';
     video.autoplay = true;
+    video.muted = true;
     video.style.width = '100%';
     video.style.height = '100%';
     video.style.display = 'none';
+    video.addEventListener('play', () => {
+      console.log('H.264 Video: Playing');
+    });
+    video.addEventListener('pause', () => {
+      console.log('H.264 Video: Paused');
+    });
+    video.addEventListener('error', (err) => {
+      console.error('H.264 Video: Error', err);
+    });
     decoder_container.appendChild(video);
 
     // Initialize MediaSource API
@@ -291,34 +301,48 @@ function init_h264_decoder() {
     video.src = URL.createObjectURL(mediaSource);
 
     return new Promise((resolve) => {
-      mediaSource.addEventListener('sourceopen', () => {
+      const sourceOpenHandler = () => {
         try {
           let mimeType = 'video/mp4; codecs="avc1.42E01E"';
           let sourceBuffer = null;
 
+          console.log('H.264 Decoder: sourceopen event fired');
+          console.log('MediaSource.isTypeSupported check:', mimeType, MediaSource.isTypeSupported(mimeType));
+
           if (MediaSource.isTypeSupported(mimeType)) {
             sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            console.log('H.264 Decoder: Added SourceBuffer with avc1.42E01E');
           } else {
             mimeType = 'video/mp4; codecs="avc1"';
+            console.log('avc1.42E01E not supported, trying avc1');
             if (MediaSource.isTypeSupported(mimeType)) {
               sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+              console.log('H.264 Decoder: Added SourceBuffer with avc1');
             } else {
-              throw new Error(`H.264 MIME type not supported`);
+              throw new Error(`H.264 MIME types not supported: avc1.42E01E and avc1 both failed`);
             }
           }
 
           const decoder = { sourceBuffer, mediaSource, video };
-          console.log('H.264 Decoder: Initialized for provider stream');
+          console.log('H.264 Decoder: Initialized successfully', { mimeType, videoReady: video.readyState });
           resolve(decoder);
         } catch (err) {
-          console.error('H.264 Decoder: Initialization failed', err);
+          console.error('H.264 Decoder: Initialization failed in sourceopen:', err);
           resolve(null);
         }
-      }, { once: true });
+      };
+
+      mediaSource.addEventListener('sourceopen', sourceOpenHandler, { once: true });
 
       mediaSource.addEventListener('error', (err) => {
-        console.error('H.264 Decoder: MediaSource error', err);
+        console.error('H.264 Decoder: MediaSource error', { readyState: mediaSource.readyState, error: err });
       });
+
+      setTimeout(() => {
+        if (mediaSource.readyState !== 'open') {
+          console.warn('H.264 Decoder: sourceopen never fired after 5s, mediaSource state:', mediaSource.readyState);
+        }
+      }, 5000);
     });
   } catch (err) {
     console.error('H.264 Decoder: Setup failed', err);
@@ -1086,6 +1110,8 @@ async function connectToSession(session_id = null) {
         }
 
         if (msg.type === 'h264_chunk' && msg.data) {
+          console.log('H.264 Chunk received from provider:', { chunk_len: msg.data?.length, decoder_ready: !!h264_decoder });
+
           const binaryString = atob(msg.data);
           const bytes = new Uint8Array(binaryString.length);
           for (let i = 0; i < binaryString.length; i++) {
@@ -1093,16 +1119,42 @@ async function connectToSession(session_id = null) {
           }
 
           if (!h264_decoder) {
+            console.log('H.264 Decoder not ready, initializing...');
             init_h264_decoder().then((decoder) => {
+              console.log('H.264 Decoder initialized:', !!decoder);
               h264_decoder = decoder;
-              if (h264_decoder && h264_decoder.sourceBuffer && h264_decoder.sourceBuffer.updating === false) {
+              if (h264_decoder && h264_decoder.sourceBuffer) {
+                console.log('SourceBuffer ready, updating:', h264_decoder.sourceBuffer.updating);
+                if (h264_decoder.sourceBuffer.updating === false) {
+                  try {
+                    h264_decoder.sourceBuffer.appendBuffer(bytes);
+                    console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
+                  } catch (err) {
+                    console.error('H.264 SourceBuffer append failed:', err);
+                  }
+                } else {
+                  console.log('SourceBuffer still updating, skipping chunk');
+                }
+              } else {
+                console.error('H.264 Decoder missing sourceBuffer');
+              }
+            }).catch(err => {
+              console.error('H.264 Decoder init failed:', err);
+            });
+          } else if (h264_decoder && h264_decoder.sourceBuffer) {
+            console.log('H.264 SourceBuffer appending, updating:', h264_decoder.sourceBuffer.updating);
+            if (h264_decoder.sourceBuffer.updating === false) {
+              try {
                 h264_decoder.sourceBuffer.appendBuffer(bytes);
                 console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
+              } catch (err) {
+                console.error('H.264 SourceBuffer append failed:', err);
               }
-            });
-          } else if (h264_decoder && h264_decoder.sourceBuffer && h264_decoder.sourceBuffer.updating === false) {
-            h264_decoder.sourceBuffer.appendBuffer(bytes);
-            console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
+            } else {
+              console.log('SourceBuffer still updating, skipping chunk');
+            }
+          } else {
+            console.error('H.264 Decoder exists but missing sourceBuffer');
           }
         } else if (session.term) {
           if (msg.type === 'ready') {
