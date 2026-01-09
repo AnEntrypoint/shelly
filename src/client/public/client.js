@@ -670,6 +670,8 @@ function init_terminal_for_session(session_id) {
         return;
       }
 
+      term.write(data);
+
       if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
       const msg = {
