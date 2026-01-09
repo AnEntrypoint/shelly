@@ -5,10 +5,17 @@ let is_connected = false;
 let current_session = null;
 
 function init_terminal() {
+  const is_mobile = window.innerWidth < 768;
+  const font_size = is_mobile ? 11 : 13;
+
   term = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    cursorStyle: 'block',
+    fontSize: font_size,
     fontFamily: "'Monaco', 'Courier New', monospace",
+    lineHeight: 1.2,
+    letterSpacing: 0,
+    scrollback: 1000,
     theme: {
       background: '#1e1e1e',
       foreground: '#d4d4d4',
@@ -31,12 +38,18 @@ function init_terminal() {
       brightCyan: '#4fc3f7',
       white: '#d4d4d4',
       brightWhite: '#d4d4d4'
-    }
+    },
+    allowProposedApi: true
   });
 
   fitAddon = new window.FitAddon();
   term.loadAddon(fitAddon);
-  term.open(document.getElementById('terminal'));
+
+  const term_elem = document.getElementById('terminal');
+  term_elem.setAttribute('autocomplete', 'off');
+  term_elem.setAttribute('spellcheck', 'false');
+
+  term.open(term_elem);
   fitAddon.fit();
 
   term.onData((data) => {
@@ -48,16 +61,21 @@ function init_terminal() {
     }
   });
 
-  window.addEventListener('resize', () => {
-    fitAddon.fit();
-    if (is_connected && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'resize',
-        cols: term.cols,
-        rows: term.rows
-      }));
+  const fit_to_viewport = () => {
+    try {
+      fitAddon.fit();
+    } catch (err) {
+      console.error('Fit error:', err);
     }
+  };
+
+  window.addEventListener('resize', fit_to_viewport);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(fit_to_viewport, 100);
   });
+
+  document.addEventListener('fullscreenchange', fit_to_viewport);
+  document.addEventListener('webkitfullscreenchange', fit_to_viewport);
 
   update_status('disconnected', false);
   set_message('Ready to connect. Click "Connect" or pass session params in URL.');
@@ -85,7 +103,7 @@ async function connectToSession() {
 
   try {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws_url = `${protocol}//${window.location.host}?session_id=${params.session_id}&token=${params.token}`;
+    const ws_url = `${protocol}//${window.location.host}?session_id=${params.session_id}&token=${params.token}&type=viewer`;
 
     ws = new WebSocket(ws_url);
 
