@@ -1,13 +1,17 @@
 # Secure Reverse Shell
 
-A bidirectional web and CLI-based secure reverse shell system with proper terminal emulation via xterm.js. Both web and CLI clients can control the same shell session simultaneously.
+A bidirectional web and CLI-based secure reverse shell system with multi-tab terminal emulation via xterm.js. Multiple CLI clients can connect with the same password and appear as separate tabs in the web interface.
 
 ## Features
 
+- **Multi-Tab Web Interface**: All CLI sessions with the same password appear as tabs in one browser window
+- **Real-Time Session Detection**: New sessions auto-detect within 2 seconds via polling
 - **Xterm.js Integration**: Full terminal emulation with proper echo, cursor handling, and ANSI color support
-- **Bidirectional Communication**: Both web UI and CLI can type into the same shell session
-- **Persistent Sessions**: Sessions persist across connections and can be reattached
-- **Secure**: Bearer token authentication for all API endpoints
+- **Bidirectional Communication**: Web UI and CLI can simultaneously type into the same shell session
+- **Password-Based Auth**: Groups sessions by password - all matching sessions visible together
+- **Output Isolation**: Each terminal has its own output buffer (1 page worth = 3600 chars)
+- **Persistent CLI**: CLI processes stay alive even when web viewers disconnect
+- **Tab Auto-Cleanup**: Tabs automatically removed when CLI clients disconnect
 - **Coolify/Nixpacks Ready**: Pre-configured for deployment on Coolify with reverse proxy support
 
 ## Architecture
@@ -53,89 +57,108 @@ A bidirectional web and CLI-based secure reverse shell system with proper termin
 
 ```bash
 npm install
-SHELL_TOKEN=your-secure-token npm run dev
+npm run dev
 ```
 
-Server runs on `http://localhost:3000`
+Server runs on `http://localhost:3000` (no SHELL_TOKEN required - uses password-based auth)
 
 ### Web Client
 
-Navigate to the URL printed by CLI, or manually:
-```
-http://localhost:3000?session_id=<id>&token=<token>&shell_token=<shell_token>
-```
+1. Navigate to `http://localhost:3000`
+2. Enter a password (any string - used to group sessions)
+3. Click "Connect"
+4. All CLI clients using the same password appear as tabs
 
-Then click "Connect" button.
+### CLI Client (Recommended: NPX)
 
-### CLI Client
+Create a new shell session (runs directly from GitHub):
 
-Create new session:
 ```bash
-npm run cli -- new http://localhost:3000 <shell_token>
+npx -y gxe@latest AnEntrypoint/shellyclient start new http://localhost:3000 mypassword
 ```
 
-This outputs:
+Output:
 ```
 [session: <session-id>]
-[web: http://localhost:3000?session_id=<id>&token=<token>&shell_token=<shell_token>]
+[password-protected: yes]
+[web: http://localhost:3000 (enter password to access)]
 ```
 
-Both URLs can be used simultaneously - type in CLI or web terminal, output appears in both.
+Then open the web UI, enter `mypassword`, and your CLI session appears as a tab.
 
-Attach to existing session:
+**Multiple CLI clients with same password:**
 ```bash
-npm run cli -- attach <session-id>
+# Terminal 1
+npx -y gxe@latest AnEntrypoint/shellyclient start new http://localhost:3000 shared-pwd
+
+# Terminal 2
+npx -y gxe@latest AnEntrypoint/shellyclient start new http://localhost:3000 shared-pwd
+
+# Terminal 3
+npx -y gxe@latest AnEntrypoint/shellyclient start new http://localhost:3000 shared-pwd
 ```
 
-List all sessions:
+Then open web UI, enter `shared-pwd`, and all 3 CLI sessions appear as separate, interactive tabs.
+
+### CLI Client (Local Development)
+
+If developing locally:
+
 ```bash
-npm run cli -- list
+cd /path/to/shellyclient
+node index.js new http://localhost:3000 mypassword
+```
+
+### Attach to Existing Session
+
+If you saved a session config locally:
+```bash
+npx -y gxe@latest AnEntrypoint/shellyclient start attach <session-id>
+```
+
+List saved sessions:
+```bash
+npx -y gxe@latest AnEntrypoint/shellyclient start list
 ```
 
 ## API Endpoints
 
 ### POST /api/session
-Create a new shell session.
+Create a new shell session (password-protected).
 
 **Headers:**
 ```
-Authorization: Bearer <shell_token>
 Content-Type: application/json
 ```
 
-**Response:**
+**Body:**
 ```json
 {
-  "session_id": "uuid",
-  "token": "session-token",
-  "shell_token": "provided-shell-token"
+  "password": "your-password"
 }
-```
-
-### GET /api/session/:session_id
-Get session status.
-
-**Headers:**
-```
-Authorization: Bearer <shell_token>
 ```
 
 **Response:**
 ```json
 {
   "session_id": "uuid",
-  "is_active": true,
-  "clients": 2,
-  "created_at": 1234567890
+  "token": "session-token"
 }
 ```
 
-### GET /api/sessions
-List all active sessions.
+### POST /api/sessions/by-password
+List all active sessions for a given password.
 
 **Headers:**
 ```
-Authorization: Bearer <shell_token>
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "password": "your-password"
+}
 ```
 
 **Response:**
@@ -144,8 +167,9 @@ Authorization: Bearer <shell_token>
   "sessions": [
     {
       "id": "uuid",
+      "token": "session-token",
       "is_active": true,
-      "clients": 1,
+      "clients": 2,
       "created_at": 1234567890,
       "uptime_ms": 5000
     }
@@ -174,20 +198,18 @@ URL: `ws://localhost:3000?session_id=<id>&token=<token>`
 
 ```bash
 docker build -t secure-reverse-shell .
-docker run -e SHELL_TOKEN=your-token -p 3000:3000 secure-reverse-shell
+docker run -p 3000:3000 secure-reverse-shell
 ```
 
 ### Coolify (Nixpacks)
 
 The project includes `nixpacks.toml` configured for Coolify:
 
-1. Set environment variable `SHELL_TOKEN` to a strong random value
-2. Deploy via Coolify UI or CLI
-3. Configure reverse proxy (nginx/caddy) to forward requests
-4. Access via `https://your-domain.com`
+1. Deploy via Coolify UI or CLI
+2. Configure reverse proxy (nginx/caddy) to forward requests and upgrade WebSocket
+3. Access via `https://your-domain.com`
 
 **Environment Variables:**
-- `SHELL_TOKEN`: Bearer token for API authentication (required, set to strong value)
 - `PORT`: Server port (default: 3000)
 - `NODE_ENV`: Set to `production` in Coolify
 
@@ -229,11 +251,13 @@ All state changes are logged to stdout in JSON format for debugging:
 
 ## Security Notes
 
-- Always set `SHELL_TOKEN` to a strong random value in production
-- Use HTTPS/WSS in production via reverse proxy
-- The shell runs as the node process user (typically non-root in containers)
-- No authentication is required once a session is created and you have the session token
-- Limit access to the server at the network level if running sensitive operations
+- **Password-Based Groups**: Sessions are grouped by password hash. Users who know the password can see all sessions with that password
+- **Use HTTPS/WSS in production** via reverse proxy to encrypt passwords in transit
+- **The shell runs as the node process user** (typically non-root in containers)
+- **Session tokens grant full access**: Once a session token is obtained, it grants full shell access
+- **No per-user isolation**: Multiple users with the same password can control the same shells
+- **Limit network access** if running sensitive operations
+- For production multi-tenant use, consider adding per-session access control or separate passwords per user/group
 
 ## CLI Session Persistence
 
@@ -243,17 +267,46 @@ CLI stores session configs in `~/.shell_sessions/<session-id>.json`:
 {
   "id": "uuid",
   "token": "session-token",
-  "shell_token": "provided-shell-token",
+  "password": "your-password",
   "server_url": "http://localhost:3000",
   "created_at": 1234567890
 }
 ```
 
-This allows `npm run cli -- attach <session-id>` to reconnect without parameters.
+This allows you to reconnect using:
+```bash
+npx -y gxe@latest AnEntrypoint/shellyclient start attach <session-id>
+```
 
 ## Limitations
 
-- One shell per session (bash only currently)
-- No session recording/playback
-- No client-to-client communication
-- Session dies if server restarts
+- **One shell per session** (bash only)
+- **No session recording/playback**
+- **No client-to-client communication** (only via shared shell)
+- **Sessions lost on server restart** (no persistent storage)
+- **No per-user isolation**: All users with same password see each other's sessions
+- **Buffer limited to 1 page** (3,600 characters) to prevent memory bloat
+
+## What's Included
+
+✅ **Web Client**
+- Multi-tab interface for viewing multiple sessions
+- Real-time polling (2-second intervals) for new/removed sessions
+- Full xterm.js terminal emulation
+- Input/output isolation per tab
+- Auto-cleanup when CLI clients disconnect
+
+✅ **CLI Client (via npx)**
+- Runs directly from GitHub: `npx -y gxe@latest AnEntrypoint/shellyclient start <command>`
+- Stays alive even when web viewers disconnect
+- Persistent session storage in ~/.shell_sessions/
+- Window resize handling (SIGWINCH)
+- Password-based session grouping
+
+✅ **Server**
+- Express.js with WebSocket support
+- Password-based session grouping
+- Real-time output broadcasting
+- Input relay to shell provider
+- State logging for debugging
+- Automatic cleanup on disconnect
