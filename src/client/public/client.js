@@ -65,6 +65,9 @@ function toggle_vnc_modal() {
 }
 
 function init_h264_video_stream() {
+  // Close any existing H.264 stream first to prevent orphaned SourceBuffers
+  close_h264_video_stream();
+
   if (!active_session_id) {
     alert('No active session');
     return;
