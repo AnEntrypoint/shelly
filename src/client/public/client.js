@@ -742,22 +742,17 @@ function init_terminal_for_session(session_id) {
         const checkForInput = () => {
           const current_text = textarea.value;
           if (current_text && current_text !== last_sent_input) {
-            // Send the new text that appeared
+            // Send only the new characters that appeared
             send_terminal_input(current_text);
-            last_sent_input = '';
+            last_sent_input = current_text; // Remember what we sent
+            // Clear textarea to signal we've processed it
+            textarea.value = '';
           }
         };
 
         // Poll frequently to catch input before it's cleared
         textarea.addEventListener('keydown', checkForInput);
         textarea.addEventListener('input', checkForInput);
-
-        // Also set up a rapid poll as backup
-        setInterval(() => {
-          if (textarea && active_session_id === session_id) {
-            checkForInput();
-          }
-        }, 25);
 
         console.log('TEXTAREA_INPUT_LISTENER_ADDED', { session_id });
       }
