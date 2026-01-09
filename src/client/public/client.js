@@ -1007,19 +1007,17 @@ function switch_to_tab(session_id) {
 
     // Auto-connect if terminal exists but WebSocket is not connected
     if (!session.is_connected && session.term) {
+      set_message('Connecting...');
       connectToSession(session_id);
-    }
-
-    update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
-    if (session.is_connected) {
+    } else if (session.is_connected) {
+      // Session already connected, just update UI to reflect current state
+      update_status('connected', true);
       document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
+      document.getElementById('session-info').style.display = 'flex';
       document.getElementById('connect-btn').disabled = true;
       document.getElementById('disconnect-btn').disabled = false;
       document.getElementById('vnc-button').disabled = false;
-    } else {
-      document.getElementById('connect-btn').disabled = false;
-      document.getElementById('disconnect-btn').disabled = true;
-      document.getElementById('vnc-button').disabled = true;
+      set_message('Connected. Type to interact.');
     }
   }
 
@@ -1185,15 +1183,16 @@ async function connectToSession(session_id = null) {
 
     ws.onclose = () => {
       session.is_connected = false;
-      update_status('disconnected', false);
+      // Only update UI if this is the currently active session
       if (active_session_id === sid) {
+        update_status('disconnected', false);
         document.getElementById('session-info').style.display = 'none';
         document.getElementById('connect-btn').disabled = false;
         document.getElementById('disconnect-btn').disabled = true;
         document.getElementById('vnc-button').disabled = true;
+        set_message('Disconnected from session');
       }
       document.getElementById('tab-' + sid)?.classList.add('disconnected');
-      set_message('Disconnected from session');
       if (session.term) session.term.write('\r\n[Connection closed]\r\n');
       log_session_state('websocket_closed', { session_id: sid });
     };
@@ -1201,15 +1200,18 @@ async function connectToSession(session_id = null) {
     ws.onerror = (err) => {
       console.error('WebSocket error:', err);
       session.is_connected = false;
-      update_status('disconnected', false);
       if (session.term) {
         session.term.write('\r\n[Connection error - attempting to reconnect]\r\n');
       }
-      set_message('Connection error. Retrying...', true);
+      // Only update UI if this is the currently active session
+      if (active_session_id === sid) {
+        update_status('disconnected', false);
+        set_message('Connection error. Retrying...', true);
+      }
       log_session_state('websocket_error', { session_id: sid, error: err?.message || 'unknown' });
 
       setTimeout(() => {
-        if (!session.is_connected && session.term) {
+        if (!session.is_connected && session.term && active_session_id === sid) {
           connectToSession(sid);
         }
       }, 2000);
