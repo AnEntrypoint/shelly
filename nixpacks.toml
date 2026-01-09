@@ -4,6 +4,3 @@ cmd = "npm install"
 [start]
 cmd = "node src/server/index.js"
 port = 3000
-
-[providers.nodejs]
-nodeVersion = "22"
