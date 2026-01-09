@@ -46,7 +46,8 @@ class ShellSession {
     this.viewport_buffer = [];
     this.viewport_cols = 120;
     this.viewport_rows = 30;
-    this.max_buffer_size = 2400;
+    // Buffer limited to exactly 1 page worth (1 screen = 120 cols × 30 rows)
+    this.max_buffer_size = 3600;
     log_state('session_created', null, session_id, 'relay_session');
   }
 
