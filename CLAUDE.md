@@ -26,6 +26,12 @@
 - ✓ No false positives: Active providers always returned
 - ✓ Prevents memory leak: Orphans auto-cleaned after 30 seconds
 - ✓ Zero impact on connected sessions
+- ✓ Production deployment verified (2026-01-09 14:50 UTC):
+  - Deployed code (commit 07d9d67) confirmed running on https://shelly.247420.xyz
+  - Created 3 new shellyclient instances with password "test" connecting to production
+  - API immediately returned all 3 sessions with has_active_provider=true
+  - Terminated 1 client: API response dropped to 2 sessions within 2 seconds
+  - Confirms filtering logic correctly validates WebSocket readyState===1
 
 **Behavior After Fix**:
 - API returns ONLY sessions with connected providers (readyState === 1)

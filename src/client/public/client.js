@@ -746,6 +746,11 @@ function switch_to_tab(session_id) {
       }, 50);
     }
 
+    // Auto-connect if terminal exists but WebSocket is not connected
+    if (!session.is_connected && session.term) {
+      connectToSession(session_id);
+    }
+
     update_status(session.is_connected ? 'connected' : 'disconnected', session.is_connected);
     if (session.is_connected) {
       document.getElementById('session-id').textContent = `Session: ${session_id.substring(0, 8)}...`;
