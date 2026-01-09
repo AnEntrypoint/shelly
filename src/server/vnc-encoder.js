@@ -110,8 +110,9 @@ class VncEncoder {
 
     this.ffmpeg_process.stderr.on('data', (data) => {
       const msg = data.toString().trim();
-      if (msg && !msg.includes('frame=')) {
-        this.log_state('ffmpeg_stderr', null, msg.substring(0, 100), 'encoder_debug');
+      if (msg) {
+        // Log FULL error output, not truncated - critical for debugging
+        this.log_state('ffmpeg_stderr', null, msg, 'encoder_debug');
       }
     });
 
