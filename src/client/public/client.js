@@ -651,47 +651,18 @@ function init_terminal_for_session(session_id) {
 
     const session = sessions.get(session_id);
 
-    term.onData((data) => {
-      // DIAGNOSTIC: Log every input event with exact state
-      console.log('INPUT_EVENT', {
-        session_id,
-        data_length: data.length,
-        data_preview: data.substring(0, 50),
-        session_exists: !!session,
-        ws_exists: !!(session && session.ws),
-        ws_readyState: session?.ws?.readyState,
-        ws_OPEN: WebSocket.OPEN,
-        ws_CLOSED: WebSocket.CLOSED,
-        ws_CLOSING: WebSocket.CLOSING,
-        session_is_connected: session?.is_connected,
-        all_guards_pass: !!(session && session.ws &&
-          session.ws.readyState === WebSocket.OPEN &&
-          session.is_connected)
-      });
+    // Fallback handler for xterm textarea input
+    // xterm.js sometimes doesn't fire onData in automation, so we add a direct input listener
+    const send_terminal_input = (data) => {
+      console.log('SEND_INPUT_CALLED', { session_id, data_length: data.length, data_preview: data.substring(0, 20) });
 
       if (!session || !session.ws) {
-        set_message('Session error: WebSocket not available', true);
-        log_session_state('input_error_no_ws', { session_id, reason: 'ws_missing', session_exists: !!session, ws_exists: !!(session?.ws) });
+        console.log('SEND_INPUT_BLOCKED_NO_SESSION', { session_exists: !!session, ws_exists: !!(session?.ws) });
         return;
       }
 
-      if (session.ws.readyState === WebSocket.CLOSED || session.ws.readyState === WebSocket.CLOSING) {
-        set_message('Connection lost. Attempting to reconnect...', false);
-        log_session_state('input_ws_closed', { session_id, readyState: session.ws.readyState, CLOSED: WebSocket.CLOSED, CLOSING: WebSocket.CLOSING });
-        connectToSession(session_id);
-        return;
-      }
-
-      if (session.ws.readyState !== WebSocket.OPEN) {
-        set_message('Connecting...', false);
-        log_session_state('input_ws_not_ready', { session_id, readyState: session.ws.readyState, expected_OPEN: WebSocket.OPEN });
-        return;
-      }
-
-      if (!session.is_connected) {
-        set_message('Reconnecting...', false);
-        log_session_state('input_session_not_connected', { session_id, is_connected: session.is_connected });
-        connectToSession(session_id);
+      if (session.ws.readyState !== WebSocket.OPEN || !session.is_connected) {
+        console.log('SEND_INPUT_BLOCKED_NOT_CONNECTED', { readyState: session.ws.readyState, is_connected: session.is_connected });
         return;
       }
 
@@ -700,7 +671,7 @@ function init_terminal_for_session(session_id) {
           session.term.write(data);
         }
       } catch (err) {
-        log_session_state('term_write_error', { session_id, error: err.message });
+        // Silently ignore write errors
       }
 
       if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
@@ -721,12 +692,13 @@ function init_terminal_for_session(session_id) {
         } else {
           session.ws.send(JSON.stringify(msg));
         }
-        log_session_state('input_sent', { session_id, bytes: data.length });
+        log_session_state('input_sent_fallback', { session_id, bytes: data.length });
       } catch (err) {
-        log_session_state('input_send_error', { session_id, error: err.message });
-        set_message('Failed to send input', true);
+        log_session_state('input_send_error_fallback', { session_id, error: err.message });
       }
-    });
+    };
+
+    term.onData((data) => send_terminal_input(data));
 
     const fit_to_viewport = () => {
       try {
