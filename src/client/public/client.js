@@ -1,3 +1,18 @@
+// Library validation - check all required dependencies are loaded
+function validate_libraries() {
+  const missing = [];
+  if (!window.Terminal) missing.push('xterm (Terminal)');
+  if (!window.FitAddon?.FitAddon && !window.FitAddon) missing.push('xterm addon-fit');
+  if (!window.msgpackr?.Packr) missing.push('msgpackr');
+
+  if (missing.length > 0) {
+    const error_msg = `FATAL: Required libraries not loaded: ${missing.join(', ')}. Check browser console for 404 errors on script tags.`;
+    document.body.innerHTML = `<div style="color: red; padding: 20px; font-family: monospace;">${error_msg}</div>`;
+    console.error(error_msg);
+    throw new Error(error_msg);
+  }
+}
+
 const sessions = new Map();
 let active_session_id = null;
 let current_password = null;
@@ -73,7 +88,7 @@ function init_h264_video_stream() {
 
     h264_video_ws.onmessage = (event) => {
       try {
-        if (!packer) packer = window.Packr ? new window.Packr() : null;
+        if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
         if (packer && event.data instanceof ArrayBuffer) {
           const msg = packer.unpack(new Uint8Array(event.data));
@@ -220,7 +235,7 @@ function init_vnc_tunnel() {
 
     vnc_tunnel_ws.onmessage = (event) => {
       try {
-        if (!packer) packer = window.Packr ? new window.Packr() : null;
+        if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
         if (packer && event.data instanceof ArrayBuffer) {
           const msg = packer.unpack(new Uint8Array(event.data));
@@ -282,7 +297,7 @@ function init_novnc_viewer() {
     const tunnel_handler = (data) => {
       if (vnc_tunnel_ws && vnc_tunnel_ws.readyState === WebSocket.OPEN) {
         try {
-          if (!packer) packer = window.Packr ? new window.Packr() : null;
+          if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
           const packed = packer ? packer.pack({
             type: 'vnc_frame',
@@ -588,7 +603,7 @@ function init_terminal_for_session(session_id) {
     const session = sessions.get(session_id);
     term.onData((data) => {
       if (session.is_connected && session.ws && session.ws.readyState === WebSocket.OPEN) {
-        if (!packer) packer = window.Packr ? new window.Packr() : null;
+        if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
         const msg = {
           type: 'input',
@@ -784,7 +799,7 @@ async function connectToSession(session_id = null) {
         let msg;
 
         if (event.data instanceof ArrayBuffer) {
-          if (!packer) packer = window.Packr ? new window.Packr() : null;
+          if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
           if (packer) {
             msg = packer.unpack(new Uint8Array(event.data));
           } else {
@@ -887,12 +902,22 @@ function set_message(msg, is_error = false) {
 
 document.addEventListener('DOMContentLoaded', () => {
   function wait_for_terminal_libs(callback, max_attempts = 50) {
-    if (typeof Terminal !== 'undefined' && typeof window.FitAddon !== 'undefined') {
-      callback();
+    if (typeof Terminal !== 'undefined' && typeof window.FitAddon !== 'undefined' && window.msgpackr?.Packr) {
+      try {
+        validate_libraries();
+        callback();
+      } catch (err) {
+        console.error('Library validation failed:', err);
+      }
     } else if (max_attempts > 0) {
       setTimeout(() => wait_for_terminal_libs(callback, max_attempts - 1), 100);
     } else {
-      console.error('Timeout: xterm libraries failed to load');
+      const missing = [];
+      if (typeof Terminal === 'undefined') missing.push('xterm');
+      if (typeof window.FitAddon === 'undefined') missing.push('addon-fit');
+      if (!window.msgpackr?.Packr) missing.push('msgpackr');
+      document.body.innerHTML = `<div style="color: red; padding: 20px; font-family: monospace;">FATAL: Libraries failed to load after 5 seconds: ${missing.join(', ')}. Check browser console for 404 errors.</div>`;
+      console.error('CRITICAL: Required libraries failed to load:', missing);
     }
   }
 
