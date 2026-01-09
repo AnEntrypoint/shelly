@@ -1,7 +1,5 @@
-providers = ["...", "node", "python"]
-
 [build]
-cmds = ["npm install", "npm rebuild node-pty"]
+cmd = "npm install"
 
 [start]
 cmd = "node src/server/index.js"

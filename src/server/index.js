@@ -2,7 +2,6 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { v4 as uuid } from 'uuid';
-import { spawn } from 'node-pty';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -35,68 +34,16 @@ class ShellSession {
   constructor(session_id) {
     this.id = session_id;
     this.token = generate_token();
-    this.pty = null;
     this.created_at = Date.now();
     this.clients_connected = new Set();
-    this.buffer = [];
+    this.shell_provider_id = null;
     this.is_active = true;
-    log_state('session_created', null, session_id, 'new_session');
+    log_state('session_created', null, session_id, 'relay_session');
   }
 
-  spawn_shell(shell_path = '/bin/bash') {
-    try {
-      this.pty = spawn(shell_path, [], {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30
-      });
-
-      this.pty.on('data', (data) => {
-        this.buffer.push(data);
-        this.broadcast_to_clients(data);
-      });
-
-      this.pty.on('exit', (code) => {
-        log_state('pty_exited', 'running', code, 'shell_closed');
-        this.is_active = false;
-        this.broadcast_to_clients(null);
-        sessions.delete(this.id);
-      });
-
-      log_state('pty_spawned', null, this.id, 'shell_start');
-      return true;
-    } catch (err) {
-      log_state('pty_spawn_error', null, err.message, 'spawn_failed');
-      return false;
-    }
-  }
-
-  send_input(data) {
-    if (!this.is_active || !this.pty) return false;
-    try {
-      this.pty.write(data);
-      log_state('input_sent', null, `${data.length}_bytes`, 'user_input');
-      return true;
-    } catch (err) {
-      log_state('input_error', null, err.message, 'write_failed');
-      return false;
-    }
-  }
-
-  resize(cols, rows) {
-    if (!this.pty) return false;
-    try {
-      this.pty.resize(cols, rows);
-      log_state('pty_resized', null, `${cols}x${rows}`, 'resize_request');
-      return true;
-    } catch (err) {
-      log_state('resize_error', null, err.message, 'resize_failed');
-      return false;
-    }
-  }
-
-  broadcast_to_clients(data) {
+  broadcast_to_clients(data, exclude_client_id = null) {
     for (const client_id of this.clients_connected) {
+      if (client_id === exclude_client_id) continue;
       const client = clients.get(client_id);
       if (client && client.ws && client.ws.readyState === 1) {
         client.ws.send(JSON.stringify({
@@ -109,13 +56,26 @@ class ShellSession {
     }
   }
 
-  close() {
-    if (this.pty) {
-      this.pty.kill();
-      log_state('session_closed', 'active', 'terminated', 'explicit_close');
+  relay_input_to_provider(data) {
+    if (!this.shell_provider_id) return false;
+    const provider = clients.get(this.shell_provider_id);
+    if (provider && provider.ws && provider.ws.readyState === 1) {
+      provider.ws.send(JSON.stringify({
+        type: 'relay_input',
+        data: data ? Buffer.from(data).toString('base64') : null,
+        session_id: this.id,
+        timestamp: Date.now()
+      }));
+      log_state('input_relayed', null, `${data.length}_bytes`, 'relay_to_provider');
+      return true;
     }
+    return false;
+  }
+
+  close() {
     this.is_active = false;
     sessions.delete(this.id);
+    log_state('session_closed', 'active', 'terminated', 'relay_close');
   }
 }
 
@@ -143,13 +103,8 @@ app.post('/api/session', (req, res) => {
 
   const session_id = uuid();
   const session = new ShellSession(session_id);
-
-  if (!session.spawn_shell()) {
-    return res.status(500).json({ error: 'failed_to_spawn_shell' });
-  }
-
   sessions.set(session_id, session);
-  log_state('session_created_http', null, session_id, 'http_create');
+  log_state('session_created_http', null, session_id, 'relay_session_created');
 
   res.json({
     session_id,
@@ -204,6 +159,7 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const session_id = url.searchParams.get('session_id');
   const token = url.searchParams.get('token');
+  const client_type = url.searchParams.get('type') || 'viewer';
 
   const session = sessions.get(session_id);
   if (!session || token !== session.token) {
@@ -212,15 +168,21 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  clients.set(client_id, { ws, session_id, connected_at: Date.now() });
+  clients.set(client_id, { ws, session_id, client_type, connected_at: Date.now() });
   session.clients_connected.add(client_id);
 
-  log_state('client_connected', null, client_id, 'ws_connected');
+  if (client_type === 'provider') {
+    session.shell_provider_id = client_id;
+    log_state('shell_provider_connected', null, client_id, 'provider_connected');
+  } else {
+    log_state('viewer_connected', null, client_id, 'viewer_connected');
+  }
 
   ws.send(JSON.stringify({
     type: 'ready',
     session_id,
     client_id,
+    client_type,
     timestamp: Date.now()
   }));
 
@@ -228,11 +190,13 @@ wss.on('connection', (ws, req) => {
     try {
       const msg = JSON.parse(message);
 
-      if (msg.type === 'input') {
-        const data = Buffer.from(msg.data, 'base64').toString();
-        session.send_input(data);
-      } else if (msg.type === 'resize') {
-        session.resize(msg.cols, msg.rows);
+      if (msg.type === 'output' && client_type === 'provider') {
+        const data = Buffer.from(msg.data, 'base64');
+        session.broadcast_to_clients(data, client_id);
+        log_state('output_broadcasted', null, `${data.length}_bytes`, 'relay_output');
+      } else if (msg.type === 'input' && client_type === 'viewer') {
+        const data = Buffer.from(msg.data, 'base64');
+        session.relay_input_to_provider(data);
       }
     } catch (err) {
       log_state('ws_message_error', null, err.message, 'parse_failed');
@@ -241,6 +205,10 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     session.clients_connected.delete(client_id);
+    if (session.shell_provider_id === client_id) {
+      session.shell_provider_id = null;
+      log_state('shell_provider_disconnected', null, client_id, 'provider_closed');
+    }
     clients.delete(client_id);
     log_state('client_disconnected', null, client_id, 'ws_closed');
   });
