@@ -248,15 +248,12 @@ function close_h264_video_stream() {
     h264_video_ws = null;
   }
   if (h264_decoder_vnc) {
-    if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
-      try {
-        h264_decoder_vnc.mediaSource.endOfStream();
-      } catch (err) {
-        // Silently ignore if already ended
-      }
-    }
+    // Just release reference - don't call endOfStream() which orphans SourceBuffer
+    // If we call endOfStream(), any chunks that arrive after will fail with "removed from parent"
     if (h264_decoder_vnc.video && h264_decoder_vnc.video.src) {
-      URL.revokeObjectURL(h264_decoder_vnc.video.src);
+      try {
+        URL.revokeObjectURL(h264_decoder_vnc.video.src);
+      } catch (err) {}
     }
     h264_decoder_vnc = null;
   }
