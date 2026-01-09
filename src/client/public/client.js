@@ -125,6 +125,9 @@ async function connectToSession() {
 
         if (msg.type === 'ready') {
           term.write('\r\n[Session ready]\r\n');
+        } else if (msg.type === 'buffer' && msg.data) {
+          const decoded = atob(msg.data);
+          term.write(decoded);
         } else if (msg.type === 'output' && msg.data) {
           const decoded = atob(msg.data);
           term.write(decoded);

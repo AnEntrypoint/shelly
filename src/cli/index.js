@@ -29,7 +29,6 @@ class PersistentSession {
     this.server_url = config.server_url;
     this.ws = null;
     this.is_connected = false;
-    this.output_buffer = [];
     this.rl = null;
     log_state('cli_session_created', null, this.id, 'init');
   }
@@ -39,26 +38,28 @@ class PersistentSession {
       try {
         const protocol = this.server_url.startsWith('https') ? 'wss:' : 'ws:';
         const base_url = this.server_url.replace(/^https?:\/\//, '');
-        const ws_url = `${protocol}//${base_url}/ws?session_id=${this.id}&token=${this.token}`;
+        const ws_url = `${protocol}//${base_url}/?session_id=${this.id}&token=${this.token}&type=provider`;
 
         this.ws = new WebSocket(ws_url);
 
         this.ws.on('open', () => {
           log_state('cli_ws_connected', false, true, 'ws_open');
           this.is_connected = true;
+
+          const cols = process.stdout.columns || 120;
+          const rows = process.stdout.rows || 30;
+          this.resize(cols, rows);
+          log_state('initial_resize_sent', null, `${cols}x${rows}`, 'terminal_size');
+
           resolve();
         });
 
         this.ws.on('message', (data) => {
           try {
             const msg = JSON.parse(data);
-            if (msg.type === 'output' && msg.data) {
+            if (msg.type === 'relay_input' && msg.data) {
               const decoded = Buffer.from(msg.data, 'base64').toString();
               process.stdout.write(decoded);
-              this.output_buffer.push(decoded);
-              if (this.output_buffer.length > 1000) {
-                this.output_buffer.shift();
-              }
             }
           } catch (err) {
             log_state('cli_message_parse_error', null, err.message, 'parse_failed');
@@ -171,11 +172,22 @@ class PersistentSession {
       this.send_input(chunk.toString());
     };
 
+    const handle_resize = () => {
+      if (process.stdout.isTTY) {
+        const cols = process.stdout.columns || 120;
+        const rows = process.stdout.rows || 30;
+        this.resize(cols, rows);
+        log_state('terminal_resized', null, `${cols}x${rows}`, 'sigwinch');
+      }
+    };
+
     if (process.stdin.isTTY) {
       this.rl.on('line', handle_line);
     } else {
       process.stdin.on('data', handle_stdin);
     }
+
+    process.on('SIGWINCH', handle_resize);
 
     this.rl.on('close', () => {
       if (this.ws) {

@@ -38,10 +38,44 @@ class ShellSession {
     this.clients_connected = new Set();
     this.shell_provider_id = null;
     this.is_active = true;
+    this.viewport_buffer = [];
+    this.viewport_cols = 120;
+    this.viewport_rows = 30;
+    this.max_buffer_size = 2400;
     log_state('session_created', null, session_id, 'relay_session');
   }
 
+  update_viewport_size(cols, rows) {
+    this.viewport_cols = cols || 120;
+    this.viewport_rows = rows || 30;
+    this.max_buffer_size = this.viewport_cols * this.viewport_rows;
+  }
+
+  buffer_output(data) {
+    if (!data || data.length === 0) return;
+
+    const str = typeof data === 'string' ? data : data.toString();
+    this.viewport_buffer.push(str);
+
+    const total_len = this.viewport_buffer.reduce((sum, s) => sum + s.length, 0);
+    if (total_len > this.max_buffer_size) {
+      let excess = total_len - this.max_buffer_size;
+      while (excess > 0 && this.viewport_buffer.length > 0) {
+        const first = this.viewport_buffer.shift();
+        excess -= first.length;
+      }
+    }
+  }
+
+  get_current_buffer() {
+    return this.viewport_buffer.join('');
+  }
+
   broadcast_to_clients(data, exclude_client_id = null) {
+    if (data && data.length > 0) {
+      this.buffer_output(data);
+    }
+
     for (const client_id of this.clients_connected) {
       if (client_id === exclude_client_id) continue;
       const client = clients.get(client_id);
@@ -74,6 +108,7 @@ class ShellSession {
 
   close() {
     this.is_active = false;
+    this.viewport_buffer = [];
     sessions.delete(this.id);
     log_state('session_closed', 'active', 'terminated', 'relay_close');
   }
@@ -186,6 +221,17 @@ wss.on('connection', (ws, req) => {
     timestamp: Date.now()
   }));
 
+  const current_buffer = session.get_current_buffer();
+  if (current_buffer && current_buffer.length > 0) {
+    ws.send(JSON.stringify({
+      type: 'buffer',
+      data: Buffer.from(current_buffer).toString('base64'),
+      session_id,
+      timestamp: Date.now()
+    }));
+    log_state('buffer_sent', null, `${current_buffer.length}_bytes`, 'reconnect_buffer');
+  }
+
   ws.on('message', (message) => {
     try {
       const msg = JSON.parse(message);
@@ -197,6 +243,9 @@ wss.on('connection', (ws, req) => {
       } else if (msg.type === 'input' && client_type === 'viewer') {
         const data = Buffer.from(msg.data, 'base64');
         session.relay_input_to_provider(data);
+      } else if (msg.type === 'resize' && client_type === 'provider') {
+        session.update_viewport_size(msg.cols, msg.rows);
+        log_state('viewport_updated', null, `${msg.cols}x${msg.rows}`, 'provider_resize');
       }
     } catch (err) {
       log_state('ws_message_error', null, err.message, 'parse_failed');
