@@ -235,7 +235,21 @@ app.post('/api/sessions/by-password', (req, res) => {
 
   const sessions_list = session_ids
     .map(id => sessions.get(id))
-    .filter(s => s && s.is_active && s.has_active_provider)
+    .filter(s => {
+      if (!s || !s.is_active || !s.has_active_provider) {
+        return false;
+      }
+      // Verify provider is actually connected (not stale)
+      if (s.shell_provider_id) {
+        const provider = clients.get(s.shell_provider_id);
+        if (!provider || !provider.ws || provider.ws.readyState !== 1) {
+          // Provider is stale, mark as disconnected and filter out
+          s.has_active_provider = false;
+          return false;
+        }
+      }
+      return true;
+    })
     .map(s => ({
       id: s.id,
       token: s.token,
@@ -312,6 +326,22 @@ class VncTunnel {
 }
 
 const vnc_tunnels = new Map();
+
+// Periodic cleanup of orphaned sessions (no provider and no clients for >30s)
+setInterval(() => {
+  const now = Date.now();
+  const orphan_timeout = 30000; // 30 seconds
+
+  for (const [session_id, session] of sessions) {
+    if (!session.has_active_provider && session.clients_connected.size === 0) {
+      const age = now - session.created_at;
+      if (age > orphan_timeout) {
+        session.close();
+        log_state('orphaned_session_cleaned', null, session_id, 'cleanup_timeout');
+      }
+    }
+  }
+}, 10000); // Check every 10 seconds
 
 wss.on('connection', (ws, req) => {
   const client_id = uuid();
