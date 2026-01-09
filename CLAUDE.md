@@ -1,6 +1,44 @@
 # Implementation Summary
 
-## Latest Hotfix (2026-01-09 - 18:00 UTC): Critical Production Issues - Terminal Display & H264 Decoder
+## Latest Hotfix (2026-01-09 - 13:20 UTC): Session Lifecycle - Preserve Session After Provider Disconnect
+
+### Issue
+CLI clients connecting as providers would cause sessions to be completely destroyed when they disconnected, even if web viewer clients were still connected. This made sessions disappear from the web UI with "No active sessions found" message.
+
+### Root Cause
+File: `src/server/index.js`, WebSocket close handler (line 528-535)
+
+When a provider (CLI client) disconnected, the code unconditionally called `session.close()`, which:
+1. Set `session.is_active = false`
+2. Removed the session from the password_groups map
+3. Made the session invisible to future `/api/sessions/by-password` queries
+
+This was incorrect because web viewer clients might still be connected and waiting for shell output.
+
+### Solution
+Removed the `session.close()` call when provider disconnects. Now the code:
+1. Sets `session.has_active_provider = false`
+2. Broadcasts disconnect event to any connected viewers
+3. Lets orphan cleanup timeout (30 seconds) handle removal if truly no clients remain
+
+### Behavior After Fix
+- Sessions remain in memory after provider disconnect
+- Web viewers remain connected (though non-interactive without provider)
+- Sessions are cleaned up after 30 seconds with no provider and no clients
+- CLI clients can reconnect to existing sessions
+- Multiple reconnects possible without creating new sessions
+
+### Testing
+Verified with comprehensive tests:
+- ✓ Session invisible until provider connects
+- ✓ Session visible when provider active
+- ✓ Session persistent after provider disconnect
+- ✓ Cleanup occurs after timeout with no clients
+- ✓ Web viewers can remain connected during provider disconnect
+
+---
+
+## Previous Hotfix (2026-01-09 - 18:00 UTC): Critical Production Issues - Terminal Display & H264 Decoder
 
 ### Root Causes Identified and Fixed
 
