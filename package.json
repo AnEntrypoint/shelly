@@ -1,6 +1,6 @@
 {
   "name": "secure-reverse-shell",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Secure web-based reverse shell with CLI sync",
   "type": "module",
   "main": "src/server/index.js",
