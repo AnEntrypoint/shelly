@@ -263,7 +263,7 @@ wss.on('connection', (ws, req) => {
     if (session.shell_provider_id === client_id) {
       session.shell_provider_id = null;
       log_state('shell_provider_disconnected', null, client_id, 'provider_closed');
-      // Close the session when shell provider disconnects (no more input/output possible)
+      // Close the session when shell provider disconnects (no more I/O possible)
       session.close();
     }
     clients.delete(client_id);
