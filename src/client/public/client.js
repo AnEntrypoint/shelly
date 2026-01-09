@@ -2,6 +2,7 @@ const sessions = new Map();
 let active_session_id = null;
 let current_password = null;
 let available_sessions = [];
+let polling_interval = null;
 
 function log_session_state(causation, details = {}) {
   console.error(JSON.stringify({
@@ -57,6 +58,62 @@ function open_all_sessions(session_list) {
   }
 }
 
+async function poll_sessions() {
+  if (!current_password) return;
+
+  try {
+    const session_list = await fetch_sessions_by_password(current_password);
+    const fetched_ids = new Set(session_list.map(s => s.id));
+    const current_ids = new Set(sessions.keys());
+
+    // Remove tabs for sessions that disconnected
+    for (const session_id of current_ids) {
+      if (!fetched_ids.has(session_id)) {
+        remove_session_tab(session_id);
+        if (active_session_id === session_id) {
+          active_session_id = null;
+        }
+        log_session_state('session_auto_removed', { session_id, reason: 'disconnected' });
+      }
+    }
+
+    // Add tabs for new sessions
+    for (const s of session_list) {
+      if (!current_ids.has(s.id)) {
+        add_session_tab(s.id, s.token);
+        if (!active_session_id) {
+          active_session_id = s.id;
+        }
+        log_session_state('session_auto_added', { session_id: s.id });
+        connectToSession(s.id);
+      }
+    }
+
+    // Ensure tab bar is visible if sessions exist
+    if (sessions.size > 0) {
+      document.getElementById('tabs-bar').style.display = 'flex';
+    } else {
+      document.getElementById('tabs-bar').style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Poll sessions error:', err);
+  }
+}
+
+function start_session_polling() {
+  if (polling_interval) clearInterval(polling_interval);
+  polling_interval = setInterval(poll_sessions, 2000);
+  log_session_state('polling_started', { interval_ms: 2000 });
+}
+
+function stop_session_polling() {
+  if (polling_interval) {
+    clearInterval(polling_interval);
+    polling_interval = null;
+    log_session_state('polling_stopped', {});
+  }
+}
+
 function select_session(session_id, token) {
   const params = new URLSearchParams();
   params.set('session_id', session_id);
@@ -88,6 +145,7 @@ async function handle_password_submit() {
     available_sessions = session_list;
     log_session_state('password_submitted', { session_count: session_list.length });
     open_all_sessions(session_list);
+    start_session_polling();
   } catch (err) {
     document.getElementById('modal-message').textContent = 'Error loading sessions';
     log_session_state('password_submit_error', { error: err.message });
@@ -389,6 +447,16 @@ function disconnectSession() {
   log_session_state('session_disconnected', { session_id: active_session_id });
 }
 
+function disconnect_all_sessions() {
+  stop_session_polling();
+  for (const [session_id] of sessions) {
+    remove_session_tab(session_id);
+  }
+  active_session_id = null;
+  current_password = null;
+  log_session_state('all_sessions_disconnected', {});
+}
+
 function update_status(status, connected) {
   const indicator = document.getElementById('status-indicator');
   const text = document.getElementById('status-text');
@@ -442,6 +510,11 @@ document.addEventListener('DOMContentLoaded', () => {
       init_terminal_for_session(params.session_id);
       connectToSession(params.session_id);
     }
+
+    // Clean up polling on page unload
+    window.addEventListener('beforeunload', () => {
+      stop_session_polling();
+    });
 
     log_session_state('page_initialized', { has_url_params: !!params.session_id });
   });
