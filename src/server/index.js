@@ -350,9 +350,17 @@ wss.on('connection', (ws, req) => {
   const token = url.searchParams.get('token');
   const endpoint = url.pathname;
 
+  log_state('ws_auth_attempt', null, { session_id, token_len: token?.length || 0, endpoint }, 'ws_connection_received');
+
   const session = sessions.get(session_id);
-  if (!session || token !== session.token) {
-    log_state('ws_auth_failed', null, session_id, 'invalid_ws_token');
+  if (!session) {
+    log_state('ws_auth_failed', null, { session_id, reason: 'session_not_found', total_sessions: sessions.size }, 'invalid_ws_session');
+    ws.close(4001, 'unauthorized');
+    return;
+  }
+
+  if (token !== session.token) {
+    log_state('ws_auth_failed', null, { session_id, token_match: false, provided_len: token?.length || 0, expected_len: session.token?.length || 0 }, 'invalid_ws_token_mismatch');
     ws.close(4001, 'unauthorized');
     return;
   }
