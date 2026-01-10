@@ -18,7 +18,7 @@ class VncEncoder {
     }
 
     // Use x11grab to capture X11 default display (VNC input format not available in FFmpeg)
-    const display = process.env.DISPLAY || ':0';
+    const display = process.env.DISPLAY || ':99';
     this.log_state('h264_encoder_init_start', null, `display=${display}`, 'encoder_init');
 
     const ffmpeg_args = [

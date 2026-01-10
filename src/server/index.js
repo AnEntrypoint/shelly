@@ -448,8 +448,8 @@ wss.on('connection', (ws, req) => {
     try {
       const vnc_host = process.env.VNC_HOST || 'localhost';
       const vnc_port = parseInt(process.env.VNC_PORT || '5900');
-      const video_width = parseInt(url.searchParams.get('width')) || 1600;
-      const video_height = parseInt(url.searchParams.get('height')) || 900;
+      const video_width = parseInt(url.searchParams.get('width')) || 1920;
+      const video_height = parseInt(url.searchParams.get('height')) || 1080;
       const framerate = Math.max(2, Math.min(10, parseInt(url.searchParams.get('fps')) || 5));
 
       const stdout = encoder.init_display_encoder(vnc_host, vnc_port, video_width, video_height, framerate);
