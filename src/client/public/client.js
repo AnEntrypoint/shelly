@@ -58,9 +58,10 @@ function toggle_vnc_modal() {
   const modal = document.getElementById('vnc-modal');
   modal.classList.toggle('active');
   if (modal.classList.contains('active')) {
-    init_h264_video_stream();
+    // Use noVNC tunnel for full RFB support (video + mouse/keyboard interaction)
+    init_vnc_tunnel();
   } else {
-    close_h264_video_stream();
+    close_vnc_tunnel();
   }
 }
 
