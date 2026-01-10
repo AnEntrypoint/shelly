@@ -508,6 +508,8 @@ function init_novnc_viewer() {
     canvas.style.height = '100%';
     canvas.style.objectFit = 'contain';
     canvas.style.backgroundColor = '#000';
+    canvas.style.cursor = 'crosshair';
+    canvas.tabIndex = 0;
     viewer_wrapper.appendChild(canvas);
 
     // Wrap WebSocket to handle msgpackr message unpacking
@@ -528,6 +530,9 @@ function init_novnc_viewer() {
       return;
     }
 
+    // Focus canvas for keyboard input
+    canvas.focus();
+
     // VNC tunnel is handled directly by SimpleVncClient
 
     const overlay = document.createElement('div');
@@ -543,7 +548,7 @@ function init_novnc_viewer() {
     overlay.style.msUserSelect = 'text';
     overlay.style.cursor = 'default';
     overlay.style.zIndex = '100';
-    overlay.textContent = 'VNC Display - select text to copy';
+    overlay.textContent = 'VNC Display - Interactive Mode [Click to focus]';
     overlay.style.color = 'rgba(255, 255, 255, 0.2)';
     overlay.style.fontSize = '11px';
     overlay.style.padding = '8px';
