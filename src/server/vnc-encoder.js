@@ -27,8 +27,9 @@ class VncEncoder {
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '28',
+      '-pix_fmt', 'yuv420p',
       '-f', 'mp4',
-      '-movflags', 'frag_keyframe+empty_moov',
+      '-movflags', 'frag_keyframe+delay_moov',
       '-frag_duration', '200',
       'pipe:1'
     ];

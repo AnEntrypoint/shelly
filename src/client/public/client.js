@@ -227,22 +227,29 @@ function init_h264_video_player(width, height) {
 
     mediaSource.addEventListener('sourceopen', () => {
       try {
-        // H.264/AVC codec MIME type - supported by all modern browsers
-        // Try standard AVC profile, fallback to more generic types
-        let mimeType = 'video/mp4; codecs="avc1.42E01E"';
+        // H.264/AVC codec MIME type for yuv420p (most compatible)
+        // avc1.42001E = baseline profile, level 3.0, yuv420p
+        let mimeType = 'video/mp4; codecs="avc1.42001E"';
         let sourceBuffer = null;
 
         if (MediaSource.isTypeSupported(mimeType)) {
           sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-          console.log('H.264 Video: Using standard AVC1 codec');
+          console.log('H.264 Video: Using baseline AVC1 codec (yuv420p)');
         } else {
-          // Fallback to simpler codec string
-          mimeType = 'video/mp4; codecs="avc1"';
+          // Fallback to main profile
+          mimeType = 'video/mp4; codecs="avc1.4D401E"';
           if (MediaSource.isTypeSupported(mimeType)) {
             sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-            console.log('H.264 Video: Using generic AVC1 codec');
+            console.log('H.264 Video: Using main profile AVC1 codec');
           } else {
-            throw new Error(`H.264 MIME type not supported: ${mimeType}`);
+            // Last resort - generic avc1
+            mimeType = 'video/mp4; codecs="avc1"';
+            if (MediaSource.isTypeSupported(mimeType)) {
+              sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+              console.log('H.264 Video: Using generic AVC1 codec');
+            } else {
+              throw new Error(`H.264 MIME type not supported`);
+            }
           }
         }
 
