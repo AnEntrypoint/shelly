@@ -475,15 +475,81 @@ function init_vnc_tunnel() {
 }
 
 function create_vnc_message_wrapper(ws) {
-  // Simple wrapper - just unpack msgpackr messages and pass data to viewer
+  // Wrapper that unpacks msgpackr VNC frames and extracts RFB data
+  const packer = new window.msgpackr.Packr();
+  let msg_count = 0;
   return {
-    // Pass raw WebSocket to viewer - no wrapping
     _ws: ws,
     addEventListener: (event, handler) => {
-      // Direct listener registration on the WebSocket
-      ws.addEventListener(event, handler);
+      if (event === 'message') {
+        // Intercept message events to unpack msgpackr and extract RFB data
+        ws.addEventListener('message', (e) => {
+          try {
+            if (e.data instanceof ArrayBuffer) {
+              const msg = packer.unpack(new Uint8Array(e.data));
+              msg_count++;
+              if (msg && msg.type === 'vnc_frame' && msg.data) {
+                // Decode base64 RFB data and create new message event
+                const binary = atob(msg.data);
+                const rfb_bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                  rfb_bytes[i] = binary.charCodeAt(i);
+                }
+                // Log for debugging
+                if (msg_count % 10 === 0 || binary.length < 50) {
+                  console.log(`VNC wrapper: received msgpackr frame #${msg_count}, decoded ${binary.length} bytes of RFB data`);
+                }
+                // Dispatch event with unpacked RFB bytes
+                handler({ data: rfb_bytes.buffer });
+              }
+            } else {
+              handler(e);
+            }
+          } catch (err) {
+            console.error('VNC message unpack error:', err);
+          }
+        });
+      } else {
+        ws.addEventListener(event, handler);
+      }
     },
-    send: (data) => ws.send(data),
+    send: (data) => {
+      // Pack RFB messages into msgpackr wrapper
+      try {
+        if (typeof data === 'string') {
+          // String data (like "RFB 003.008\n")
+          const b64 = btoa(data);
+          const msg = packer.pack({
+            type: 'vnc_frame',
+            data: b64
+          });
+          ws.send(msg);
+        } else if (data instanceof Uint8Array || ArrayBuffer.isView(data)) {
+          // Binary data
+          const binary = String.fromCharCode.apply(null, new Uint8Array(data));
+          const b64 = btoa(binary);
+          const msg = packer.pack({
+            type: 'vnc_frame',
+            data: b64
+          });
+          ws.send(msg);
+        } else if (data instanceof ArrayBuffer) {
+          // ArrayBuffer
+          const binary = String.fromCharCode.apply(null, new Uint8Array(data));
+          const b64 = btoa(binary);
+          const msg = packer.pack({
+            type: 'vnc_frame',
+            data: b64
+          });
+          ws.send(msg);
+        } else {
+          // Fallback - send as-is
+          ws.send(data);
+        }
+      } catch (err) {
+        console.error('VNC message pack error:', err);
+      }
+    },
     close: () => ws.close(),
     get readyState() { return ws.readyState; },
     binaryType: 'arraybuffer'
@@ -495,13 +561,118 @@ function init_novnc_viewer() {
   viewer.innerHTML = '';
 
   try {
+    // First, try to use H.264 video stream which is more reliable
+    if (h264_video_ws === null || h264_video_ws.readyState !== 1) {
+      init_h264_video_stream_internal(viewer);
+    } else {
+      // H.264 stream already initialized
+      const video_div = document.createElement('div');
+      video_div.id = 'h264-viewer';
+      video_div.style.width = '100%';
+      video_div.style.height = '100%';
+      video_div.style.backgroundColor = '#000';
+      viewer.appendChild(video_div);
+    }
+
+    log_session_state('novnc_initialized', { type: 'h264_stream' });
+  } catch (err) {
+    // Fallback to RFB protocol if H.264 fails
+    try_rfb_display(viewer);
+  }
+}
+
+function init_h264_video_stream_internal(viewer) {
+  if (!active_session_id) {
+    viewer.innerHTML = '<div style="color: #f48771; padding: 20px;">No active session</div>';
+    return;
+  }
+
+  const session = sessions.get(active_session_id);
+  if (!session || !session.token) {
+    viewer.innerHTML = '<div style="color: #f48771; padding: 20px;">Invalid session</div>';
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const h264_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}`;
+
+  h264_video_ws = new WebSocket(h264_url);
+  h264_video_ws.binaryType = 'arraybuffer';
+
+  const video_container = document.createElement('div');
+  video_container.id = 'h264-viewer';
+  video_container.style.width = '100%';
+  video_container.style.height = '100%';
+  video_container.style.backgroundColor = '#000';
+  video_container.style.display = 'flex';
+  video_container.style.alignItems = 'center';
+  video_container.style.justifyContent = 'center';
+  viewer.appendChild(video_container);
+
+  const video_elem = document.createElement('video');
+  video_elem.id = 'h264-video';
+  video_elem.style.maxWidth = '100%';
+  video_elem.style.maxHeight = '100%';
+  video_elem.style.width = 'auto';
+  video_elem.style.height = 'auto';
+  video_elem.controls = false;
+  video_elem.autoplay = true;
+  video_elem.playsInline = true;
+  video_container.appendChild(video_elem);
+
+  // Create MediaSource for H.264 streaming
+  const mediaSource = new MediaSource();
+  video_elem.src = URL.createObjectURL(mediaSource);
+
+  let sourceBuffer = null;
+
+  mediaSource.addEventListener('sourceopen', () => {
+    sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    log_session_state('h264_stream_opened', { codec: 'avc1.42E01E' });
+  });
+
+  h264_video_ws.onmessage = (e) => {
+    try {
+      const packed = new Uint8Array(e.data);
+      const msg = window.msgpackr.unpack(packed);
+
+      if (msg && msg.type === 'h264_chunk' && msg.data && sourceBuffer) {
+        // Decode base64 H.264 data
+        const binary = atob(msg.data);
+        const h264Data = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          h264Data[i] = binary.charCodeAt(i);
+        }
+
+        try {
+          sourceBuffer.appendBuffer(h264Data);
+        } catch (err) {
+          console.error('H.264 append error:', err);
+        }
+      }
+    } catch (err) {
+      console.error('H.264 message unpack error:', err);
+    }
+  };
+
+  h264_video_ws.onerror = (err) => {
+    log_session_state('h264_stream_error', { error: err.message || 'unknown' });
+    video_container.innerHTML = '<div style="color: #f48771; padding: 20px;">H.264 Stream Error</div>';
+  };
+
+  h264_video_ws.onclose = () => {
+    log_session_state('h264_stream_closed', {});
+  };
+}
+
+function try_rfb_display(viewer) {
+  try {
     const viewer_wrapper = document.createElement('div');
     viewer_wrapper.style.position = 'relative';
     viewer_wrapper.style.width = '100%';
     viewer_wrapper.style.height = '100%';
     viewer.appendChild(viewer_wrapper);
 
-    // Create canvas for VNC display
     const canvas = document.createElement('canvas');
     canvas.id = 'vnc-canvas';
     canvas.style.width = '100%';
@@ -512,53 +683,17 @@ function init_novnc_viewer() {
     canvas.tabIndex = 0;
     viewer_wrapper.appendChild(canvas);
 
-    // Wrap WebSocket to handle msgpackr message unpacking
     const ws_wrapper = create_vnc_message_wrapper(vnc_tunnel_ws);
 
-    // Initialize VNC client - SimpleVncViewer uses msgpackr framing, no RFB protocol needed
-    if (window.SimpleVncViewer) {
-      vnc_rfb = new SimpleVncViewer(ws_wrapper, canvas);
-      console.log('VNC Display: SimpleVncViewer initialized');
-      log_session_state('vnc_client_initialized', { type: 'SimpleVncViewer' });
-    } else if (window.MinimalVncViewer) {
+    if (window.MinimalVncViewer) {
       vnc_rfb = new MinimalVncViewer(ws_wrapper, canvas);
-      console.log('VNC Display: MinimalVncViewer initialized (fallback)');
+      console.log('VNC Display: MinimalVncViewer (RFB fallback)');
       log_session_state('vnc_client_initialized', { type: 'MinimalVncViewer' });
     } else {
-      console.error('VNC Display: VNC client library not available');
-      viewer.innerHTML = '<div style="color: #ff6b6b; padding: 20px;">VNC client not loaded</div>';
-      return;
+      viewer.innerHTML = '<div style="color: #f48771; padding: 20px;">VNC client not available</div>';
     }
-
-    // Focus canvas for keyboard input
-    canvas.focus();
-
-    // VNC tunnel is handled directly by SimpleVncClient
-
-    const overlay = document.createElement('div');
-    overlay.id = 'vnc-overlay';
-    overlay.style.position = 'absolute';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.userSelect = 'text';
-    overlay.style.WebkitUserSelect = 'text';
-    overlay.style.MozUserSelect = 'text';
-    overlay.style.msUserSelect = 'text';
-    overlay.style.cursor = 'default';
-    overlay.style.zIndex = '100';
-    overlay.textContent = 'VNC Display - Interactive Mode [Click to focus]';
-    overlay.style.color = 'rgba(255, 255, 255, 0.2)';
-    overlay.style.fontSize = '11px';
-    overlay.style.padding = '8px';
-    overlay.style.pointerEvents = 'none';
-    viewer_wrapper.appendChild(overlay);
-
-    log_session_state('novnc_initialized', {});
   } catch (err) {
-    log_session_state('novnc_init_error', { error: err.message });
-    viewer.innerHTML = `<p style="color: #f48771; padding: 20px;">Failed to initialize VNC viewer: ${err.message}</p>`;
+    viewer.innerHTML = `<div style="color: #f48771; padding: 20px;">Failed to initialize VNC: ${err.message}</div>`;
   }
 }
 
