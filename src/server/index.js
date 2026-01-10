@@ -432,8 +432,11 @@ wss.on('connection', (ws, req) => {
     log_state('ws_auth_failed', null, {
       session_id: session_id?.substring(0, 8),
       token_match: false,
+      provided: token,
+      expected: session.token,
       provided_len: token?.length || 0,
-      expected_len: session.token?.length || 0
+      expected_len: session.token?.length || 0,
+      endpoint
     }, 'invalid_ws_token_mismatch');
     ws.close(4001, 'unauthorized');
     return;
