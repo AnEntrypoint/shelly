@@ -58,10 +58,10 @@ function toggle_vnc_modal() {
   const modal = document.getElementById('vnc-modal');
   modal.classList.toggle('active');
   if (modal.classList.contains('active')) {
-    // Use noVNC tunnel for full RFB support (video + mouse/keyboard interaction)
-    init_vnc_tunnel();
+    // Display live MJPEG video stream from X11 display
+    init_h264_video_stream();
   } else {
-    close_vnc_tunnel();
+    close_h264_video_stream();
   }
 }
 
@@ -102,6 +102,10 @@ function init_h264_video_stream() {
         if (packer && event.data instanceof ArrayBuffer) {
           const msg = packer.unpack(new Uint8Array(event.data));
 
+          if (msg.type === 'h264_chunk' || msg.type === 'ready') {
+            console.log(`H.264 WebSocket: Received ${msg.type} message (${event.data.byteLength} bytes packed)`);
+          }
+
           if (msg.type === 'ready' && msg.stream_type === 'h264_video') {
             console.log('MJPEG Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
             log_session_state('h264_stream_ready', {
@@ -110,31 +114,33 @@ function init_h264_video_stream() {
               fps: msg.fps
             });
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            // MJPEG: Each chunk is a complete JPEG frame
-            if (h264_decoder_vnc && h264_decoder_vnc.img) {
+            // MJPEG: Base64-encoded JPEG frame from FFmpeg
+            if (!h264_decoder_vnc || !h264_decoder_vnc.imgElement) {
+              console.log('MJPEG Stream: Received frame but player not initialized yet');
+            } else {
               try {
-                // msg.data is base64-encoded JPEG frame
-                const dataUrl = `data:image/jpeg;base64,${msg.data}`;
-
-                // Add error handler for broken images
-                h264_decoder_vnc.img.onerror = () => {
-                  console.warn('MJPEG Stream: Failed to decode frame, will retry on next');
-                };
-
-                h264_decoder_vnc.img.src = dataUrl;
-
-                if (h264_decoder_vnc.frameCount === undefined) {
-                  h264_decoder_vnc.frameCount = 0;
-                }
                 h264_decoder_vnc.frameCount++;
-                if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 50 === 0) {
-                  console.log(`MJPEG Frame #${h264_decoder_vnc.frameCount}: ${msg.data.length} bytes base64`);
+                const now = Date.now();
+                const elapsed = now - h264_decoder_vnc.lastFrameTime;
+
+                // msg.data is base64-encoded JPEG frame
+                const dataUri = 'data:image/jpeg;base64,' + msg.data;
+                h264_decoder_vnc.imgElement.src = dataUri;
+
+                if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 100 === 0) {
+                  console.log(`MJPEG Frame #${h264_decoder_vnc.frameCount}: Displayed (${msg.data.length} bytes)`);
+                }
+
+                // Calculate and log frame rate every 5 seconds
+                if (elapsed >= 5000) {
+                  const fps = (h264_decoder_vnc.frameCount * 1000 / elapsed).toFixed(1);
+                  console.log(`MJPEG Throughput: ${fps} fps`);
+                  h264_decoder_vnc.frameCount = 0;
+                  h264_decoder_vnc.lastFrameTime = now;
                 }
               } catch (err) {
-                console.error('MJPEG Stream: Frame processing error:', err.message);
+                console.error('MJPEG Stream: Frame handler error:', err.message);
               }
-            } else {
-              console.warn('MJPEG Stream: Received frame but viewer not initialized');
             }
           }
         }
@@ -163,7 +169,7 @@ function init_h264_video_stream() {
 
 function init_h264_video_player() {
   // Guard: Don't reinitialize if already done
-  if (h264_decoder_vnc && h264_decoder_vnc.img) {
+  if (h264_decoder_vnc && h264_decoder_vnc.imgElement) {
     console.log('MJPEG Video: Player already initialized, skipping reinit');
     return;
   }
@@ -182,23 +188,28 @@ function init_h264_video_player() {
     video_container.style.backgroundColor = '#000';
     viewer.appendChild(video_container);
 
-    // Use simple img element for MJPEG frames
+    // Use img element for MJPEG frame display (simple and reliable)
     const img = document.createElement('img');
-    img.id = 'mjpeg-video';
+    img.id = 'mjpeg-frame';
     img.style.width = '100%';
     img.style.height = '100%';
+    img.style.maxWidth = '100%';
+    img.style.maxHeight = '100%';
     img.style.objectFit = 'contain';
     img.style.backgroundColor = '#000';
-    img.style.cursor = 'default';
-    img.style.transition = 'opacity 0.1s ease-in-out';
-    img.style.opacity = '1';
+    img.style.display = 'block';
     video_container.appendChild(img);
 
-    h264_decoder_vnc = { img, frameCount: 0 };
+    h264_decoder_vnc = {
+      imgElement: img,
+      frameCount: 0,
+      lastFrameTime: Date.now(),
+      initialized: true
+    };
 
-    console.log('MJPEG Video: Image-based player initialized');
+    console.log('MJPEG Video: Image element initialized for frame display');
     log_session_state('h264_decoder_initialized', {
-      type: 'mjpeg_image',
+      type: 'mjpeg_video',
       codec: 'mjpeg'
     });
   } catch (err) {
@@ -214,6 +225,9 @@ function close_h264_video_stream() {
     h264_video_ws = null;
   }
   if (h264_decoder_vnc) {
+    if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
+      h264_decoder_vnc.mediaSource.endOfStream();
+    }
     h264_decoder_vnc = null;
   }
   const viewer = document.getElementById('vnc-viewer');

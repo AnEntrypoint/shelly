@@ -7,7 +7,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Packr } from 'msgpackr';
 import net from 'net';
-import { VncEncoder } from './vnc-encoder.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -16,7 +15,6 @@ const VNC_PROXY_PORT = process.env.VNC_PROXY_PORT || 5900;
 const sessions = new Map();
 const clients = new Map();
 const password_groups = new Map();
-const h264_streams = new Map();
 
 function generate_token() {
   return crypto.randomBytes(16).toString('hex');
@@ -442,83 +440,42 @@ wss.on('connection', (ws, req) => {
   }
 
   if (endpoint === '/api/vnc-video') {
-    const encoder = new VncEncoder(session_id);
-    h264_streams.set(client_id, encoder);
+    // Video relay: receive h264_chunk messages from provider, send to viewers
+    clients.set(client_id, { ws, session_id, client_type: 'viewer', is_video_viewer: true, connected_at: Date.now() });
+    session.clients_connected.add(client_id);
 
-    try {
-      const vnc_host = process.env.VNC_HOST || 'localhost';
-      const vnc_port = parseInt(process.env.VNC_PORT || '5900');
-      const video_width = parseInt(url.searchParams.get('width')) || 1920;
-      const video_height = parseInt(url.searchParams.get('height')) || 1080;
-      const framerate = Math.max(2, Math.min(10, parseInt(url.searchParams.get('fps')) || 5));
+    ws.send(pack.pack({
+      type: 'ready',
+      session_id,
+      stream_type: 'h264_video',
+      width: 1920,
+      height: 1080,
+      fps: 20,
+      timestamp: Date.now()
+    }));
 
-      const stdout = encoder.init_display_encoder(vnc_host, vnc_port, video_width, video_height, framerate);
+    log_state('video_viewer_connected', null, client_id, 'video_relay_connected');
+    session.broadcast_log_event('video_viewer_connected', 'viewer_id', client_id);
 
-      ws.send(pack.pack({
-        type: 'ready',
-        session_id,
-        stream_type: 'h264_video',
-        width: video_width,
-        height: video_height,
-        fps: framerate,
-        timestamp: Date.now()
-      }));
-
-      log_state('h264_stream_started', null, `${video_width}x${video_height}@${framerate}fps`, 'video_stream_init');
-
-      let chunk_count = 0;
-      encoder.on_frame((chunk) => {
-        chunk_count++;
-        if (chunk_count <= 5 || chunk_count % 100 === 0) {
-          log_state('h264_chunk_ready_to_send', null, `${chunk.length}_bytes`, 'chunk_send_prep');
+    ws.on('message', (data) => {
+      // Viewers typically don't send messages, but handle if they do
+      try {
+        const msg = pack.unpack(data);
+        if (msg.type === 'control') {
+          log_state('video_control_received', null, msg.action, 'video_control');
         }
+      } catch {}
+    });
 
-        if (ws.readyState === 1) {
-          try {
-            const msg = pack.pack({
-              type: 'h264_chunk',
-              session_id,
-              data: chunk.toString('base64'),
-              timestamp: Date.now()
-            });
-            ws.send(msg);
+    ws.on('close', () => {
+      session.clients_connected.delete(client_id);
+      clients.delete(client_id);
+      log_state('video_viewer_disconnected', null, client_id, 'video_relay_closed');
+    });
 
-            if (chunk_count <= 5 || chunk_count % 100 === 0) {
-              log_state('h264_chunk_sent_to_ws', null, `${msg.length}_bytes_packed`, 'chunk_sent');
-            }
-          } catch (err) {
-            log_state('h264_send_error', null, err.message, 'video_send_failed');
-          }
-        } else {
-          log_state('h264_ws_not_ready', null, `readyState=${ws.readyState}`, 'ws_state_check');
-        }
-      });
-
-      ws.on('message', (data) => {
-        try {
-          const msg = pack.unpack(data);
-          if (msg.type === 'video_control' && msg.action === 'stop') {
-            encoder.close();
-            ws.close(1000, 'video_stopped');
-          }
-        } catch (err) {
-          log_state('h264_message_error', null, err.message, 'video_msg_parse');
-        }
-      });
-
-      ws.on('close', () => {
-        encoder.close();
-        h264_streams.delete(client_id);
-        log_state('h264_stream_closed', null, client_id, 'video_stream_ws_closed');
-      });
-
-      ws.on('error', (err) => {
-        log_state('h264_stream_ws_error', null, err.message, 'video_stream_ws_error');
-      });
-    } catch (err) {
-      ws.close(4003, `h264_init_failed: ${err.message}`);
-      log_state('h264_stream_init_failed', null, err.message, 'video_stream_init_error');
-    }
+    ws.on('error', (err) => {
+      log_state('video_viewer_error', null, err.message, 'video_relay_error');
+    });
   } else if (endpoint === '/api/vnc') {
     const tunnel = new VncTunnel(session_id, token);
     tunnel.ws = ws;
@@ -610,6 +567,31 @@ wss.on('connection', (ws, req) => {
           const data = Buffer.from(msg.data, 'base64');
           session.broadcast_to_clients(data, client_id);
           log_state('output_broadcasted', null, `${data.length}_bytes`, 'relay_output');
+        } else if (msg.type === 'h264_chunk' && client_type === 'provider') {
+          // Relay video frames to all video viewers
+          const frame_data = pack.pack(msg);
+          let viewer_count = 0;
+          let sent_count = 0;
+
+          for (const [viewer_id, viewer] of clients) {
+            if (viewer.session_id === session_id && viewer.is_video_viewer) {
+              viewer_count++;
+              if (viewer.ws && viewer.ws.readyState === 1) {
+                try {
+                  viewer.ws.send(frame_data);
+                  sent_count++;
+                } catch (err) {
+                  log_state('h264_send_to_viewer_failed', null, err.message, 'relay_error');
+                }
+              }
+            }
+          }
+
+          // Log relay activity (first 5 and every 100 frames)
+          const frame_num = parseInt(msg.session_id?.substring(0, 1) || 0);
+          if (sent_count > 0) {
+            log_state('h264_relayed_to_viewers', null, `sent_to_${sent_count}_of_${viewer_count}_viewers`, 'video_relay');
+          }
         } else if (msg.type === 'input' && client_type === 'viewer') {
           const data = Buffer.from(msg.data, 'base64');
           session.relay_input_to_provider(data);
@@ -650,4 +632,4 @@ server.listen(PORT, () => {
   log_state('server_started', null, PORT, 'server_init');
 });
 
-export { ShellSession, sessions, clients, VncTunnel, vnc_tunnels, VncEncoder, h264_streams };
+export { ShellSession, sessions, clients, VncTunnel, vnc_tunnels };
