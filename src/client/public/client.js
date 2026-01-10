@@ -287,6 +287,10 @@ function init_h264_video_player() {
       console.error('H.264 Video: Playback error', err);
     });
 
+    // Initialize H.264 video stream connection
+    console.log('H.264 Video: Initializing stream connection');
+    init_h264_video_stream();
+
   } catch (err) {
     console.error('H.264 Video: Player initialization failed', err);
     log_session_state('h264_player_init_error', { error: err.message });
@@ -561,40 +565,9 @@ function init_novnc_viewer() {
   viewer.innerHTML = '';
 
   try {
-    // Display active VNC status
-    const status_wrapper = document.createElement('div');
-    status_wrapper.style.position = 'relative';
-    status_wrapper.style.width = '100%';
-    status_wrapper.style.height = '100%';
-    status_wrapper.style.display = 'flex';
-    status_wrapper.style.alignItems = 'center';
-    status_wrapper.style.justifyContent = 'center';
-    status_wrapper.style.backgroundColor = '#1a1a1a';
-    viewer.appendChild(status_wrapper);
-
-    const status_div = document.createElement('div');
-    status_div.style.padding = '40px';
-    status_div.style.textAlign = 'center';
-    status_div.style.fontFamily = 'monospace';
-    status_div.style.color = '#858585';
-    status_div.style.lineHeight = '1.6';
-
-    status_div.innerHTML = `
-      <div style="color: #4fc3f7; font-size: 18px; font-weight: bold; margin-bottom: 20px;">
-        Display Stream :99
-      </div>
-      <div style="color: #0f0; font-size: 14px; margin-bottom: 20px;">
-        ✓ VNC Display Active
-      </div>
-      <div style="font-size: 12px; color: #858585;">
-        <div>Streaming from: Display :99 (Xvfb)</div>
-        <div>Resolution: 1920x1080</div>
-        <div>Frame rate: 20 FPS H.264</div>
-      </div>
-    `;
-    status_wrapper.appendChild(status_div);
-
-    log_session_state('novnc_initialized', { type: 'display_stream' });
+    // Initialize H.264 video player for display stream
+    init_h264_video_player();
+    log_session_state('novnc_initialized', { type: 'h264_video_player' });
   } catch (err) {
     log_session_state('vnc_initialization_error', { error: err.message });
     viewer.innerHTML = `<div style="color: #f48771; padding: 20px; font-family: monospace;">VNC Display Error: ${err.message}</div>`;
