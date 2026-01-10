@@ -9,14 +9,14 @@ class VncEncoder {
     this.last_frame_time = Date.now();
   }
 
-  init_display_encoder(vnc_host = 'localhost', vnc_port = 5900, width = 1024, height = 768, framerate = 5) {
+  init_display_encoder(vnc_host = 'localhost', vnc_port = 5900, width = 1600, height = 900, framerate = 5) {
     if (this.ffmpeg_process) {
       this.log_state('h264_encoder_reuse', null, 'process_already_exists', 'encoder_init');
       return this.ffmpeg_process.stdout;
     }
 
-    // Use x11grab to capture Xvfb display :99 instead of VNC (VNC input format not available in FFmpeg)
-    const display = process.env.DISPLAY || ':99';
+    // Use x11grab to capture X11 default display (VNC input format not available in FFmpeg)
+    const display = process.env.DISPLAY || ':0';
     this.log_state('h264_encoder_init_start', null, `display=${display}`, 'encoder_init');
 
     const ffmpeg_args = [
