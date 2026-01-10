@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>VNC Viewer</title>
+  <style>
+    body { margin: 0; background: #000; }
+    canvas { display: block; width: 100%; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    // Simple VNC viewer - connect to localhost:5900
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size
+    canvas.width = 1920;
+    canvas.height = 1080;
+    
+    // Draw placeholder
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0f0';
+    ctx.font = '20px monospace';
+    ctx.fillText('VNC Display :99', 50, 50);
+    
+    console.log('VNC viewer ready');
+  </script>
+</body>
+</html>

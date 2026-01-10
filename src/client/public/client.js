@@ -54,14 +54,33 @@ function log_session_state(causation, details = {}) {
   }
 }
 
+function create_h264_segment(nalUnits) {
+  if (!nalUnits || nalUnits.length === 0) return null;
+
+  // Concatenate all NAL units into a single buffer
+  let totalLength = 0;
+  for (let nal of nalUnits) {
+    totalLength += nal.byteLength;
+  }
+
+  const segment = new Uint8Array(totalLength);
+  let offset = 0;
+  for (let nal of nalUnits) {
+    segment.set(nal, offset);
+    offset += nal.byteLength;
+  }
+
+  return segment.buffer;
+}
+
 function toggle_vnc_modal() {
   const modal = document.getElementById('vnc-modal');
   modal.classList.toggle('active');
   if (modal.classList.contains('active')) {
-    // Display live MJPEG video stream from X11 display
-    init_h264_video_stream();
+    // Display VNC via noVNC viewer
+    init_vnc_tunnel();
   } else {
-    close_h264_video_stream();
+    close_vnc_tunnel();
   }
 }
 
@@ -81,17 +100,17 @@ function init_h264_video_stream() {
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const video_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}&fps=5`;
+  const video_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}&fps=20`;
 
   try {
-    console.log('MJPEG Stream: Connecting to video endpoint');
+    console.log('H.264 Stream: Connecting to video endpoint');
 
     h264_video_ws = new WebSocket(video_url);
     h264_video_ws.binaryType = 'arraybuffer';
 
     h264_video_ws.onopen = () => {
       log_session_state('h264_stream_opened', { url: video_url });
-      console.log('MJPEG Stream: WebSocket connected, waiting for frames');
+      console.log('H.264 Stream: WebSocket connected, waiting for frames');
       init_h264_video_player();
     };
 
@@ -107,39 +126,61 @@ function init_h264_video_stream() {
           }
 
           if (msg.type === 'ready' && msg.stream_type === 'h264_video') {
-            console.log('MJPEG Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
+            console.log('H.264 Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
             log_session_state('h264_stream_ready', {
               width: msg.width,
               height: msg.height,
               fps: msg.fps
             });
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            // MJPEG: Base64-encoded JPEG frame from FFmpeg
-            if (!h264_decoder_vnc || !h264_decoder_vnc.imgElement) {
-              console.log('MJPEG Stream: Received frame but player not initialized yet');
+            // H.264: Base64-encoded NAL units from FFmpeg
+            if (!h264_decoder_vnc || !h264_decoder_vnc.videoElement) {
+              console.log('H.264 Stream: Received frame but player not initialized yet');
             } else {
               try {
+                // Decode base64 H.264 NAL unit to binary
+                const binaryString = atob(msg.data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+
                 h264_decoder_vnc.frameCount++;
                 const now = Date.now();
                 const elapsed = now - h264_decoder_vnc.lastFrameTime;
 
-                // msg.data is base64-encoded JPEG frame
-                const dataUri = 'data:image/jpeg;base64,' + msg.data;
-                h264_decoder_vnc.imgElement.src = dataUri;
+                // Queue NAL units for processing
+                h264_decoder_vnc.nalQueue.push(bytes);
 
-                if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 100 === 0) {
-                  console.log(`MJPEG Frame #${h264_decoder_vnc.frameCount}: Displayed (${msg.data.length} bytes)`);
+                // If SourceBuffer is ready, feed the H.264 data
+                if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer && h264_decoder_vnc.initialized &&
+                    h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open' &&
+                    !h264_decoder_vnc.sourceBuffer.updating) {
+                  try {
+                    // Create a simple MP4 segment with the H.264 data
+                    const segment = create_h264_segment(h264_decoder_vnc.nalQueue);
+                    if (segment && segment.byteLength > 0) {
+                      h264_decoder_vnc.sourceBuffer.appendBuffer(segment);
+                      h264_decoder_vnc.nalQueue = []; // Clear queue after adding
+
+                      if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 50 === 0) {
+                        console.log(`H.264 Frame #${h264_decoder_vnc.frameCount}: Appended to SourceBuffer (${segment.byteLength} bytes)`);
+                      }
+                    }
+                  } catch (err) {
+                    console.error('H.264 Stream: SourceBuffer append error:', err.message);
+                  }
                 }
 
                 // Calculate and log frame rate every 5 seconds
                 if (elapsed >= 5000) {
                   const fps = (h264_decoder_vnc.frameCount * 1000 / elapsed).toFixed(1);
-                  console.log(`MJPEG Throughput: ${fps} fps`);
+                  console.log(`H.264 Throughput: ${fps} fps`);
                   h264_decoder_vnc.frameCount = 0;
                   h264_decoder_vnc.lastFrameTime = now;
                 }
               } catch (err) {
-                console.error('MJPEG Stream: Frame handler error:', err.message);
+                console.error('H.264 Stream: Frame handler error:', err.message);
               }
             }
           }
@@ -151,26 +192,26 @@ function init_h264_video_stream() {
     };
 
     h264_video_ws.onclose = () => {
-      console.log('MJPEG Stream: WebSocket closed');
+      console.log('H.264 Stream: WebSocket closed');
       log_session_state('h264_stream_closed', {});
       close_h264_video_stream();
     };
 
     h264_video_ws.onerror = (err) => {
-      console.error('MJPEG Stream: WebSocket error', err);
+      console.error('H.264 Stream: WebSocket error', err);
       log_session_state('h264_stream_error', { error: err.message });
     };
   } catch (err) {
-    console.error('MJPEG Stream: Initialization error', err);
+    console.error('H.264 Stream: Initialization error', err);
     log_session_state('h264_stream_init_error', { error: err.message });
-    alert(`MJPEG stream error: ${err.message}`);
+    alert(`H.264 stream error: ${err.message}`);
   }
 }
 
 function init_h264_video_player() {
   // Guard: Don't reinitialize if already done
-  if (h264_decoder_vnc && h264_decoder_vnc.imgElement) {
-    console.log('MJPEG Video: Player already initialized, skipping reinit');
+  if (h264_decoder_vnc && h264_decoder_vnc.videoElement) {
+    console.log('H.264 Video: Player already initialized, skipping reinit');
     return;
   }
 
@@ -188,34 +229,68 @@ function init_h264_video_player() {
     video_container.style.backgroundColor = '#000';
     viewer.appendChild(video_container);
 
-    // Use img element for MJPEG frame display (simple and reliable)
-    const img = document.createElement('img');
-    img.id = 'mjpeg-frame';
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.maxWidth = '100%';
-    img.style.maxHeight = '100%';
-    img.style.objectFit = 'contain';
-    img.style.backgroundColor = '#000';
-    img.style.display = 'block';
-    video_container.appendChild(img);
+    // Create video element for H.264 playback
+    const video = document.createElement('video');
+    video.id = 'h264-video';
+    video.autoplay = true;
+    video.muted = true;
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.maxWidth = '100%';
+    video.style.maxHeight = '100%';
+    video.style.objectFit = 'contain';
+    video.style.backgroundColor = '#000';
+    video.style.display = 'block';
+    video_container.appendChild(video);
+
+    // Initialize MediaSource for H.264 streaming
+    const mediaSource = new MediaSource();
+    video.src = URL.createObjectURL(mediaSource);
 
     h264_decoder_vnc = {
-      imgElement: img,
+      videoElement: video,
+      mediaSource: mediaSource,
+      sourceBuffer: null,
       frameCount: 0,
       lastFrameTime: Date.now(),
-      initialized: true
+      nalQueue: [],
+      initialized: false,
+      hasReceivedSPS: false,
+      hasReceivedPPS: false
     };
 
-    console.log('MJPEG Video: Image element initialized for frame display');
-    log_session_state('h264_decoder_initialized', {
-      type: 'mjpeg_video',
-      codec: 'mjpeg'
+    mediaSource.addEventListener('sourceopen', () => {
+      try {
+        const mimeType = 'video/mp4; codecs="avc1.42E01E"';
+        console.log('H.264 Video: MediaSource opened, adding SourceBuffer with', mimeType);
+
+        if (MediaSource.isTypeSupported(mimeType)) {
+          h264_decoder_vnc.sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+          h264_decoder_vnc.initialized = true;
+          console.log('H.264 Video: SourceBuffer ready for H.264 frames');
+          log_session_state('h264_decoder_initialized', { type: 'h264_video', codec: 'avc1' });
+        } else {
+          console.error('H.264 Video: Codec not supported by browser');
+          viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #ff6b6b; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Video</strong><br/><br/>Your browser does not support H.264 decoding<br/>Please use Chrome, Edge, or Safari</div></div>`;
+        }
+      } catch (err) {
+        console.error('H.264 Video: SourceBuffer setup failed', err);
+      }
     });
+
+    mediaSource.addEventListener('error', (err) => {
+      console.error('H.264 Video: MediaSource error', err);
+      log_session_state('h264_mediasource_error', { error: err.message });
+    });
+
+    video.addEventListener('error', (err) => {
+      console.error('H.264 Video: Playback error', err);
+    });
+
   } catch (err) {
-    console.error('MJPEG Video: Player initialization failed', err);
+    console.error('H.264 Video: Player initialization failed', err);
     log_session_state('h264_player_init_error', { error: err.message });
-    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #4fc3f7; font-family: monospace; padding: 20px; text-align: center;"><div><strong>MJPEG Video Stream</strong><br/><br/>Initializing video player...<br/><br/>${err.message}</div></div>`;
+    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #ff6b6b; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Video Stream</strong><br/><br/>Initialization failed<br/><br/>${err.message}</div></div>`;
   }
 }
 
@@ -225,8 +300,16 @@ function close_h264_video_stream() {
     h264_video_ws = null;
   }
   if (h264_decoder_vnc) {
+    if (h264_decoder_vnc.videoElement) {
+      h264_decoder_vnc.videoElement.pause();
+      h264_decoder_vnc.videoElement.src = '';
+    }
     if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
-      h264_decoder_vnc.mediaSource.endOfStream();
+      try {
+        h264_decoder_vnc.mediaSource.endOfStream();
+      } catch (err) {
+        console.log('H.264 Video: endOfStream already ended');
+      }
     }
     h264_decoder_vnc = null;
   }
@@ -391,6 +474,22 @@ function init_vnc_tunnel() {
   }
 }
 
+function create_vnc_message_wrapper(ws) {
+  // Simple wrapper - just unpack msgpackr messages and pass data to viewer
+  return {
+    // Pass raw WebSocket to viewer - no wrapping
+    _ws: ws,
+    addEventListener: (event, handler) => {
+      // Direct listener registration on the WebSocket
+      ws.addEventListener(event, handler);
+    },
+    send: (data) => ws.send(data),
+    close: () => ws.close(),
+    get readyState() { return ws.readyState; },
+    binaryType: 'arraybuffer'
+  };
+}
+
 function init_novnc_viewer() {
   const viewer = document.getElementById('vnc-viewer');
   viewer.innerHTML = '';
@@ -402,45 +501,34 @@ function init_novnc_viewer() {
     viewer_wrapper.style.height = '100%';
     viewer.appendChild(viewer_wrapper);
 
-    const rfb = new RFB(viewer_wrapper, vnc_tunnel_ws);
-    rfb.addEventListener('connect', () => {
-      log_session_state('novnc_connected', {});
-    });
-    rfb.addEventListener('disconnect', () => {
-      log_session_state('novnc_disconnected', {});
-    });
-    rfb.addEventListener('error', (evt) => {
-      log_session_state('novnc_error', { error: evt.detail?.message });
-    });
+    // Create canvas for VNC display
+    const canvas = document.createElement('canvas');
+    canvas.id = 'vnc-canvas';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.objectFit = 'contain';
+    canvas.style.backgroundColor = '#000';
+    viewer_wrapper.appendChild(canvas);
 
-    vnc_rfb = rfb;
+    // Wrap WebSocket to handle msgpackr message unpacking
+    const ws_wrapper = create_vnc_message_wrapper(vnc_tunnel_ws);
 
-    const tunnel_handler = (data) => {
-      if (vnc_tunnel_ws && vnc_tunnel_ws.readyState === WebSocket.OPEN) {
-        try {
-          if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
+    // Initialize VNC client - SimpleVncViewer uses msgpackr framing, no RFB protocol needed
+    if (window.SimpleVncViewer) {
+      vnc_rfb = new SimpleVncViewer(ws_wrapper, canvas);
+      console.log('VNC Display: SimpleVncViewer initialized');
+      log_session_state('vnc_client_initialized', { type: 'SimpleVncViewer' });
+    } else if (window.MinimalVncViewer) {
+      vnc_rfb = new MinimalVncViewer(ws_wrapper, canvas);
+      console.log('VNC Display: MinimalVncViewer initialized (fallback)');
+      log_session_state('vnc_client_initialized', { type: 'MinimalVncViewer' });
+    } else {
+      console.error('VNC Display: VNC client library not available');
+      viewer.innerHTML = '<div style="color: #ff6b6b; padding: 20px;">VNC client not loaded</div>';
+      return;
+    }
 
-          const packed = packer ? packer.pack({
-            type: 'vnc_frame',
-            session_id: active_session_id,
-            data: Buffer.from(data).toString('base64'),
-            timestamp: Date.now()
-          }) : JSON.stringify({
-            type: 'vnc_frame',
-            session_id: active_session_id,
-            data: Buffer.from(data).toString('base64'),
-            timestamp: Date.now()
-          });
-
-          vnc_tunnel_ws.send(packed);
-          log_session_state('vnc_frame_sent', { bytes: data.length });
-        } catch (err) {
-          log_session_state('vnc_send_error', { error: err.message });
-        }
-      }
-    };
-
-    rfb._sock.send = tunnel_handler;
+    // VNC tunnel is handled directly by SimpleVncClient
 
     const overlay = document.createElement('div');
     overlay.id = 'vnc-overlay';
