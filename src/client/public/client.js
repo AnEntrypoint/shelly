@@ -114,6 +114,12 @@ function init_h264_video_stream() {
               try {
                 // msg.data is base64-encoded JPEG frame
                 const dataUrl = `data:image/jpeg;base64,${msg.data}`;
+
+                // Add error handler for broken images
+                h264_decoder_vnc.img.onerror = () => {
+                  console.warn('MJPEG Stream: Failed to decode frame, will retry on next');
+                };
+
                 h264_decoder_vnc.img.src = dataUrl;
 
                 if (h264_decoder_vnc.frameCount === undefined) {
@@ -183,6 +189,8 @@ function init_h264_video_player() {
     img.style.objectFit = 'contain';
     img.style.backgroundColor = '#000';
     img.style.cursor = 'default';
+    img.style.transition = 'opacity 0.1s ease-in-out';
+    img.style.opacity = '1';
     video_container.appendChild(img);
 
     h264_decoder_vnc = { img, frameCount: 0 };
