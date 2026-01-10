@@ -28,8 +28,8 @@ class VncEncoder {
       '-preset', 'ultrafast',
       '-crf', '28',
       '-f', 'mp4',
-      '-movflags', 'frag_keyframe+delay_moov+faststart',
-      '-frag_duration', '500',
+      '-movflags', 'frag_keyframe+empty_moov',
+      '-frag_duration', '200',
       'pipe:1'
     ];
 

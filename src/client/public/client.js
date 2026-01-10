@@ -123,12 +123,32 @@ function init_h264_video_stream() {
                   bytes[i] = binaryString.charCodeAt(i);
                 }
 
-                if (h264_decoder_vnc.sourceBuffer.updating === false) {
-                  h264_decoder_vnc.sourceBuffer.appendBuffer(bytes);
-                  console.log('H.264 Stream: Appended', bytes.length, 'bytes');
+                // Log first few chunks to diagnose format
+                if (h264_decoder_vnc.chunkCount === undefined) {
+                  h264_decoder_vnc.chunkCount = 0;
                 }
-              } catch (append_err) {
-                console.warn('H.264 Stream: Failed to append chunk', append_err);
+                h264_decoder_vnc.chunkCount++;
+                if (h264_decoder_vnc.chunkCount <= 5 || h264_decoder_vnc.chunkCount % 100 === 0) {
+                  const header = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                  console.log(`H.264 Chunk #${h264_decoder_vnc.chunkCount}: ${bytes.length}B, header: ${header}`);
+                }
+
+                if (h264_decoder_vnc.sourceBuffer.updating === false) {
+                  try {
+                    h264_decoder_vnc.sourceBuffer.appendBuffer(bytes);
+                  } catch (append_err) {
+                    console.error('H.264 Stream: appendBuffer threw error:', append_err.name, append_err.message);
+                    // Try to recover by checking mediaSource state
+                    if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState !== 'open') {
+                      console.warn('H.264 Stream: MediaSource no longer open, reinitializing...');
+                      init_h264_video_stream();
+                    }
+                  }
+                } else {
+                  console.log('H.264 Stream: SourceBuffer still updating, waiting...');
+                }
+              } catch (err) {
+                console.error('H.264 Stream: Chunk processing error:', err.name, err.message);
               }
             } else {
               console.warn('H.264 Stream: Received frame but decoder not initialized');
@@ -194,6 +214,17 @@ function init_h264_video_player(width, height) {
     const mediaSource = new MediaSource();
     video.src = URL.createObjectURL(mediaSource);
 
+    // Listen for video element errors
+    video.addEventListener('error', (e) => {
+      console.error('H.264 Video element error:', e.target.error?.code, e.target.error?.message);
+    });
+    video.addEventListener('loadstart', () => {
+      console.log('H.264 Video: loadstart event');
+    });
+    video.addEventListener('progress', () => {
+      console.log('H.264 Video: progress event (data received)');
+    });
+
     mediaSource.addEventListener('sourceopen', () => {
       try {
         // H.264/AVC codec MIME type - supported by all modern browsers
@@ -216,6 +247,17 @@ function init_h264_video_player(width, height) {
         }
 
         h264_decoder_vnc = { sourceBuffer, mediaSource, video };
+
+        // Listen for SourceBuffer errors (demuxer rejections)
+        sourceBuffer.addEventListener('error', (err) => {
+          console.error('H.264 SourceBuffer error event:', err);
+        });
+        sourceBuffer.addEventListener('updateend', () => {
+          console.log('H.264 SourceBuffer: updateend event (chunk processed)');
+        });
+        sourceBuffer.addEventListener('updatestart', () => {
+          console.log('H.264 SourceBuffer: updatestart event (processing chunk)');
+        });
 
         console.log('H.264 Video: Native MediaSource initialized with fragmented MP4');
         log_session_state('h264_decoder_initialized', {
