@@ -65,7 +65,7 @@ function toggle_vnc_modal() {
 }
 
 function init_h264_video_stream() {
-  // Close any existing H.264 stream first to prevent orphaned SourceBuffers
+  // Close any existing stream first
   close_h264_video_stream();
 
   if (!active_session_id) {
@@ -83,19 +83,15 @@ function init_h264_video_stream() {
   const video_url = `${protocol}//${window.location.host}/api/vnc-video?session_id=${active_session_id}&token=${session.token}&fps=5`;
 
   try {
-    console.log('H.264 Stream: Checking decoder availability');
-    console.log('  window.H264Decoder:', typeof window.H264Decoder);
-
-    if (!window.H264Decoder) {
-      console.warn('H.264 decoder not loaded. Library may be blocked or CDN may be unreachable.');
-    }
+    console.log('MJPEG Stream: Connecting to video endpoint');
 
     h264_video_ws = new WebSocket(video_url);
     h264_video_ws.binaryType = 'arraybuffer';
 
     h264_video_ws.onopen = () => {
       log_session_state('h264_stream_opened', { url: video_url });
-      console.log('H.264 Stream: WebSocket connected, waiting for frames');
+      console.log('MJPEG Stream: WebSocket connected, waiting for frames');
+      init_h264_video_player();
     };
 
     h264_video_ws.onmessage = (event) => {
@@ -106,82 +102,62 @@ function init_h264_video_stream() {
           const msg = packer.unpack(new Uint8Array(event.data));
 
           if (msg.type === 'ready' && msg.stream_type === 'h264_video') {
-            console.log('H.264 Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
+            console.log('MJPEG Stream: Ready message received', { width: msg.width, height: msg.height, fps: msg.fps });
             log_session_state('h264_stream_ready', {
               width: msg.width,
               height: msg.height,
               fps: msg.fps
             });
-            init_h264_video_player(msg.width, msg.height);
           } else if (msg.type === 'h264_chunk' && msg.data) {
-            if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer) {
+            // MJPEG: Each chunk is a complete JPEG frame
+            if (h264_decoder_vnc && h264_decoder_vnc.img) {
               try {
-                // Decode base64 to binary and convert to Uint8Array for MediaSource
-                const binaryString = atob(msg.data);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
-                }
+                // msg.data is base64-encoded JPEG frame
+                const dataUrl = `data:image/jpeg;base64,${msg.data}`;
+                h264_decoder_vnc.img.src = dataUrl;
 
-                // Log first few chunks to diagnose format
-                if (h264_decoder_vnc.chunkCount === undefined) {
-                  h264_decoder_vnc.chunkCount = 0;
+                if (h264_decoder_vnc.frameCount === undefined) {
+                  h264_decoder_vnc.frameCount = 0;
                 }
-                h264_decoder_vnc.chunkCount++;
-                if (h264_decoder_vnc.chunkCount <= 5 || h264_decoder_vnc.chunkCount % 100 === 0) {
-                  const header = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                  console.log(`H.264 Chunk #${h264_decoder_vnc.chunkCount}: ${bytes.length}B, header: ${header}`);
-                }
-
-                if (h264_decoder_vnc.sourceBuffer.updating === false) {
-                  try {
-                    h264_decoder_vnc.sourceBuffer.appendBuffer(bytes);
-                  } catch (append_err) {
-                    console.error('H.264 Stream: appendBuffer threw error:', append_err.name, append_err.message);
-                    // Try to recover by checking mediaSource state
-                    if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState !== 'open') {
-                      console.warn('H.264 Stream: MediaSource no longer open, reinitializing...');
-                      init_h264_video_stream();
-                    }
-                  }
-                } else {
-                  console.log('H.264 Stream: SourceBuffer still updating, waiting...');
+                h264_decoder_vnc.frameCount++;
+                if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 50 === 0) {
+                  console.log(`MJPEG Frame #${h264_decoder_vnc.frameCount}: ${msg.data.length} bytes base64`);
                 }
               } catch (err) {
-                console.error('H.264 Stream: Chunk processing error:', err.name, err.message);
+                console.error('MJPEG Stream: Frame processing error:', err.message);
               }
             } else {
-              console.warn('H.264 Stream: Received frame but decoder not initialized');
+              console.warn('MJPEG Stream: Received frame but viewer not initialized');
             }
           }
         }
       } catch (err) {
-        console.error('H.264 Stream: Message processing error', err);
+        console.error('MJPEG Stream: Message processing error', err);
         log_session_state('h264_message_error', { error: err.message });
       }
     };
 
     h264_video_ws.onclose = () => {
-      console.log('H.264 Stream: WebSocket closed');
+      console.log('MJPEG Stream: WebSocket closed');
       log_session_state('h264_stream_closed', {});
       close_h264_video_stream();
     };
 
     h264_video_ws.onerror = (err) => {
-      console.error('H.264 Stream: WebSocket error', err);
+      console.error('MJPEG Stream: WebSocket error', err);
       log_session_state('h264_stream_error', { error: err.message });
     };
   } catch (err) {
-    console.error('H.264 Stream: Initialization error', err);
+    console.error('MJPEG Stream: Initialization error', err);
     log_session_state('h264_stream_init_error', { error: err.message });
-    alert(`H.264 stream error: ${err.message}`);
+    alert(`MJPEG stream error: ${err.message}`);
   }
 }
 
-function init_h264_video_player(width, height) {
+function init_h264_video_player() {
   // Guard: Don't reinitialize if already done
-  if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer && h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
-    console.log('H.264 Video: Decoder already initialized, skipping reinit');
+  if (h264_decoder_vnc && h264_decoder_vnc.img) {
+    console.log('MJPEG Video: Player already initialized, skipping reinit');
     return;
   }
 
@@ -199,95 +175,27 @@ function init_h264_video_player(width, height) {
     video_container.style.backgroundColor = '#000';
     viewer.appendChild(video_container);
 
-    // Use native HTML5 video element with MediaSource API
-    const video = document.createElement('video');
-    video.id = 'h264-video';
-    video.controls = false;
-    video.autoplay = true;
-    video.style.width = '100%';
-    video.style.height = '100%';
-    video.style.objectFit = 'contain';
-    video.style.backgroundColor = '#000';
-    video_container.appendChild(video);
+    // Use simple img element for MJPEG frames
+    const img = document.createElement('img');
+    img.id = 'mjpeg-video';
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'contain';
+    img.style.backgroundColor = '#000';
+    img.style.cursor = 'default';
+    video_container.appendChild(img);
 
-    // Initialize MediaSource API for native H.264 streaming
-    const mediaSource = new MediaSource();
-    video.src = URL.createObjectURL(mediaSource);
+    h264_decoder_vnc = { img, frameCount: 0 };
 
-    // Listen for video element errors
-    video.addEventListener('error', (e) => {
-      console.error('H.264 Video element error:', e.target.error?.code, e.target.error?.message);
+    console.log('MJPEG Video: Image-based player initialized');
+    log_session_state('h264_decoder_initialized', {
+      type: 'mjpeg_image',
+      codec: 'mjpeg'
     });
-    video.addEventListener('loadstart', () => {
-      console.log('H.264 Video: loadstart event');
-    });
-    video.addEventListener('progress', () => {
-      console.log('H.264 Video: progress event (data received)');
-    });
-
-    mediaSource.addEventListener('sourceopen', () => {
-      try {
-        // H.264/AVC codec MIME type for yuv420p (most compatible)
-        // avc1.42001E = baseline profile, level 3.0, yuv420p
-        let mimeType = 'video/mp4; codecs="avc1.42001E"';
-        let sourceBuffer = null;
-
-        if (MediaSource.isTypeSupported(mimeType)) {
-          sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-          console.log('H.264 Video: Using baseline AVC1 codec (yuv420p)');
-        } else {
-          // Fallback to main profile
-          mimeType = 'video/mp4; codecs="avc1.4D401E"';
-          if (MediaSource.isTypeSupported(mimeType)) {
-            sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-            console.log('H.264 Video: Using main profile AVC1 codec');
-          } else {
-            // Last resort - generic avc1
-            mimeType = 'video/mp4; codecs="avc1"';
-            if (MediaSource.isTypeSupported(mimeType)) {
-              sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-              console.log('H.264 Video: Using generic AVC1 codec');
-            } else {
-              throw new Error(`H.264 MIME type not supported`);
-            }
-          }
-        }
-
-        h264_decoder_vnc = { sourceBuffer, mediaSource, video };
-
-        // Listen for SourceBuffer errors (demuxer rejections)
-        sourceBuffer.addEventListener('error', (err) => {
-          console.error('H.264 SourceBuffer error event:', err);
-        });
-        sourceBuffer.addEventListener('updateend', () => {
-          console.log('H.264 SourceBuffer: updateend event (chunk processed)');
-        });
-        sourceBuffer.addEventListener('updatestart', () => {
-          console.log('H.264 SourceBuffer: updatestart event (processing chunk)');
-        });
-
-        console.log('H.264 Video: Native MediaSource initialized with fragmented MP4');
-        log_session_state('h264_decoder_initialized', {
-          type: 'native_mediasource',
-          width,
-          height,
-          mimeType
-        });
-      } catch (err) {
-        console.error('H.264 Video: MediaSource initialization failed', err);
-        log_session_state('h264_mediasource_error', { error: err.message });
-      }
-    }, { once: true });
-
-    mediaSource.addEventListener('error', (err) => {
-      console.error('H.264 Video: MediaSource error', err);
-      log_session_state('h264_mediasource_error', { error: err.message });
-    });
-
   } catch (err) {
-    console.error('H.264 Video: Player initialization failed', err);
+    console.error('MJPEG Video: Player initialization failed', err);
     log_session_state('h264_player_init_error', { error: err.message });
-    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #4fc3f7; font-family: monospace; padding: 20px; text-align: center;"><div><strong>H.264 Video Stream</strong><br/><br/>Initializing native browser decoder...<br/><br/>${err.message}</div></div>`;
+    viewer.innerHTML = `<div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; color: #4fc3f7; font-family: monospace; padding: 20px; text-align: center;"><div><strong>MJPEG Video Stream</strong><br/><br/>Initializing video player...<br/><br/>${err.message}</div></div>`;
   }
 }
 
@@ -297,13 +205,6 @@ function close_h264_video_stream() {
     h264_video_ws = null;
   }
   if (h264_decoder_vnc) {
-    // Just release reference - don't call endOfStream() which orphans SourceBuffer
-    // If we call endOfStream(), any chunks that arrive after will fail with "removed from parent"
-    if (h264_decoder_vnc.video && h264_decoder_vnc.video.src) {
-      try {
-        URL.revokeObjectURL(h264_decoder_vnc.video.src);
-      } catch (err) {}
-    }
     h264_decoder_vnc = null;
   }
   const viewer = document.getElementById('vnc-viewer');

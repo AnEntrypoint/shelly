@@ -24,13 +24,9 @@ class VncEncoder {
       '-framerate', framerate.toString(),
       '-video_size', `${width}x${height}`,
       '-i', `${display}.0`,
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-crf', '28',
-      '-pix_fmt', 'yuv420p',
-      '-f', 'mp4',
-      '-movflags', 'frag_keyframe+delay_moov',
-      '-frag_duration', '200',
+      '-c:v', 'mjpeg',
+      '-q:v', '5',
+      '-f', 'mjpeg',
       'pipe:1'
     ];
 
