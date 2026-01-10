@@ -1084,54 +1084,7 @@ async function connectToSession(session_id = null) {
           throw new Error('Unknown message format: ' + (typeof event.data));
         }
 
-        if (msg.type === 'h264_chunk' && msg.data) {
-          console.log('H.264 Chunk received from provider:', { chunk_len: msg.data?.length, decoder_ready: !!h264_decoder_terminal });
-
-          const binaryString = atob(msg.data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-
-          if (!h264_decoder_terminal) {
-            console.log('H.264 Decoder not ready, initializing...');
-            init_h264_decoder().then((decoder) => {
-              console.log('H.264 Decoder initialized:', !!decoder);
-              h264_decoder_terminal = decoder;
-              if (h264_decoder_terminal && h264_decoder_terminal.sourceBuffer) {
-                console.log('SourceBuffer ready, updating:', h264_decoder_terminal.sourceBuffer.updating);
-                if (h264_decoder_terminal.sourceBuffer.updating === false) {
-                  try {
-                    h264_decoder_terminal.sourceBuffer.appendBuffer(bytes);
-                    console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
-                  } catch (err) {
-                    console.error('H.264 SourceBuffer append failed:', err);
-                  }
-                } else {
-                  console.log('SourceBuffer still updating, skipping chunk');
-                }
-              } else {
-                console.error('H.264 Decoder missing sourceBuffer');
-              }
-            }).catch(err => {
-              console.error('H.264 Decoder init failed:', err);
-            });
-          } else if (h264_decoder_terminal && h264_decoder_terminal.sourceBuffer) {
-            console.log('H.264 SourceBuffer appending, updating:', h264_decoder_terminal.sourceBuffer.updating);
-            if (h264_decoder_terminal.sourceBuffer.updating === false) {
-              try {
-                h264_decoder_terminal.sourceBuffer.appendBuffer(bytes);
-                console.log('H.264 Stream: Appended', bytes.length, 'bytes from provider');
-              } catch (err) {
-                console.error('H.264 SourceBuffer append failed:', err);
-              }
-            } else {
-              console.log('SourceBuffer still updating, skipping chunk');
-            }
-          } else {
-            console.error('H.264 Decoder exists but missing sourceBuffer');
-          }
-        } else if (session.term) {
+        if (session.term) {
           if (msg.type === 'ready') {
             session.term.write('\r\n[Session ready]\r\n');
           } else if (msg.type === 'buffer' && msg.data) {

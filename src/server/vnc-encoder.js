@@ -10,6 +10,8 @@ class VncEncoder {
   }
 
   init_display_encoder(vnc_host = 'localhost', vnc_port = 5900, width = 1600, height = 900, framerate = 5) {
+    // Note: For /api/vnc-video endpoint, these parameters come from client request query params
+    // For direct FFmpeg encoding, these defaults capture from DISPLAY environment variable
     if (this.ffmpeg_process) {
       this.log_state('h264_encoder_reuse', null, 'process_already_exists', 'encoder_init');
       return this.ffmpeg_process.stdout;
