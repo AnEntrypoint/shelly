@@ -259,12 +259,14 @@ function init_terminal_for_session(session_id) {
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: font_size,
-      fontFamily: "'Monaco', 'Courier New', monospace",
-      lineHeight: 1.2,
+      fontFamily: "'Menlo', 'Consolas', 'Monaco', 'Ubuntu Mono', 'Courier New', monospace",
+      lineHeight: 1.3,
       letterSpacing: 0,
       scrollback: 1000,
       theme,
-      allowProposedApi: true
+      allowProposedApi: true,
+      windowsMode: false,
+      fastScrollSensitivity: 5
     });
 
     let fitAddon;
@@ -342,32 +344,31 @@ function init_terminal_for_session(session_id) {
       }
     }, 100);
 
-    const session = sessions.get(session_id);
-
-    // Fallback handler for xterm textarea input
-    // xterm.js sometimes doesn't fire onData in automation, so we add a direct input listener
+    // Send terminal input - always fetch fresh session to avoid closure issues
     const send_terminal_input = (data) => {
-      console.log('SEND_INPUT_CALLED', { session_id, data_length: data.length, data_preview: data.substring(0, 20) });
+      const session = sessions.get(session_id);
 
-      if (!session || !session.ws) {
-        console.log('SEND_INPUT_BLOCKED_NO_SESSION', { session_exists: !!session, ws_exists: !!(session?.ws) });
+      console.log('SEND_INPUT_CALLED', { session_id, data_length: data.length, data_hex: Array.from(data).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ') });
+
+      if (!session) {
+        console.log('SEND_INPUT_ERROR_NO_SESSION', { session_id });
         return;
       }
 
-      if (session.ws.readyState !== WebSocket.OPEN || !session.is_connected) {
-        console.log('SEND_INPUT_BLOCKED_NOT_CONNECTED', { readyState: session.ws.readyState, is_connected: session.is_connected });
+      if (!session.ws) {
+        console.log('SEND_INPUT_ERROR_NO_WS', { session_id, is_connected: session.is_connected });
         return;
       }
 
-      // IMPORTANT: Don't write user input back to terminal in a relay scenario
-      // The server will echo it back. Writing it here causes feedback loops and breaks xterm's input system
-      // try {
-      //   if (session.term) {
-      //     session.term.write(data);
-      //   }
-      // } catch (err) {
-      //   // Silently ignore write errors
-      // }
+      if (session.ws.readyState !== WebSocket.OPEN) {
+        console.log('SEND_INPUT_ERROR_WS_NOT_OPEN', { readyState: session.ws.readyState, state_name: ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.ws.readyState] });
+        return;
+      }
+
+      if (!session.is_connected) {
+        console.log('SEND_INPUT_ERROR_NOT_CONNECTED', { is_connected: session.is_connected });
+        return;
+      }
 
       if (!packer) packer = window.msgpackr?.Packr ? new window.msgpackr.Packr() : null;
 
@@ -381,15 +382,19 @@ function init_terminal_for_session(session_id) {
           try {
             const packed = packer.pack(msg);
             session.ws.send(packed);
-          } catch {
+            console.log('SEND_INPUT_SUCCESS_PACKED', { session_id, bytes: data.length });
+          } catch (packErr) {
             session.ws.send(JSON.stringify(msg));
+            console.log('SEND_INPUT_SUCCESS_JSON', { session_id, bytes: data.length });
           }
         } else {
           session.ws.send(JSON.stringify(msg));
+          console.log('SEND_INPUT_SUCCESS_JSON', { session_id, bytes: data.length });
         }
-        log_session_state('input_sent_fallback', { session_id, bytes: data.length });
+        log_session_state('input_sent', { session_id, bytes: data.length });
       } catch (err) {
-        log_session_state('input_send_error_fallback', { session_id, error: err.message });
+        console.error('SEND_INPUT_ERROR_EXCEPTION', { error: err.message });
+        log_session_state('input_send_error', { session_id, error: err.message });
       }
     };
 
@@ -398,14 +403,42 @@ function init_terminal_for_session(session_id) {
       send_terminal_input(data);
     });
 
-    // Ensure the textarea receives input by focusing it when terminal is focused
-    // This enables keyboard input to be captured by xterm
-    term.onKey((event) => {
+    // Fallback: Direct textarea listener for keyboard capture
+    setTimeout(() => {
       const textarea = document.querySelector('.xterm-helper-textarea');
-      if (textarea && document.activeElement !== textarea) {
-        textarea.focus();
+      if (textarea) {
+        // Track last input to avoid duplicates
+        let lastInput = '';
+
+        const handleTextareaInput = () => {
+          const currentText = textarea.value;
+          if (currentText && currentText !== lastInput) {
+            console.log('TEXTAREA_INPUT_DETECTED', { data: currentText, hex: Array.from(currentText).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ') });
+            send_terminal_input(currentText);
+            lastInput = currentText;
+            textarea.value = '';
+          }
+        };
+
+        // Listen to direct input events
+        textarea.addEventListener('input', handleTextareaInput, { passive: false });
+        textarea.addEventListener('keydown', () => {
+          setTimeout(handleTextareaInput, 0);
+        }, { passive: false });
+
+        // Also capture paste events
+        textarea.addEventListener('paste', (e) => {
+          const pasted = (e.clipboardData || window.clipboardData).getData('text');
+          if (pasted) {
+            console.log('TEXTAREA_PASTE_DETECTED', { data: pasted });
+            send_terminal_input(pasted);
+            e.preventDefault();
+          }
+        }, { passive: false });
+
+        console.log('TEXTAREA_LISTENERS_ATTACHED', { textarea_found: !!textarea });
       }
-    });
+    }, 100);
 
     const fit_to_viewport = () => {
       try {
