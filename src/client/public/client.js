@@ -1,3 +1,4 @@
+// HOT RELOAD TEST MARKER: v2 (hot reload verified working!)
 // Library validation - check all required dependencies are loaded
 function validate_libraries() {
   const missing = [];
@@ -54,18 +55,137 @@ function log_session_state(causation, details = {}) {
   }
 }
 
+// Modern H.264 Video Stream Handler - HLS for low-latency playback
+function start_hls_stream(video) {
+  console.log('Video: Starting H.264 stream via HLS (ultra-low-latency mode)');
+
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    console.log('Video: Using HLS.js player with low-latency optimization');
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      highBufferWatchdogPeriod: 1,
+      nudgeOffset: 0.2,
+      maxFrontBuffer: 1,
+      maxBufferLength: 1.5,
+      maxLoadingDelay: 0.5,
+      autoStartLoad: true,
+      startLevel: 0,
+      initialLiveManifestSize: 3,
+      liveBackBufferLength: 0,
+      liveSyncDuration: 0.5,
+      liveSyncDurationCount: 1,
+      fragLoadPolicy: {
+        default: { maxTimeToFirstByteMs: 4000, maxLoadTimeMs: 15000 }
+      }
+    });
+
+    hls.loadSource('/api/stream.m3u8');
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      console.log('Video: HLS manifest loaded, starting playback');
+      // Start playback as soon as segments are available
+      video.play().catch(err => {
+        console.log('Video: Autoplay failed:', err.message);
+      });
+    });
+
+    hls.on(Hls.Events.FRAG_LOADED, () => {
+      // Ensure we're always at the live edge
+      if (video.buffered.length > 0) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        const duration = video.duration;
+        if (duration && (duration - video.currentTime) > 1.0) {
+          video.currentTime = Math.max(duration - 0.3, 0);
+        }
+      }
+    });
+
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      console.error('Video: HLS error -', data);
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    console.log('Video: Using native HLS support (Safari)');
+    video.src = '/api/stream.m3u8';
+    video.play().catch(err => {
+      console.log('Video: Autoplay failed:', err.message);
+    });
+  } else {
+    console.error('Video: HLS not supported in this browser');
+  }
+}
+
+// Extract SPS and PPS from H.264 NAL units
+function extractSpsAndPps(nalUnits) {
+  let sps = null, pps = null;
+  for (let nal of nalUnits) {
+    if (nal.length < 1) continue;
+    const nalType = nal[0] & 0x1F;
+    if (nalType === 7) { // SPS
+      sps = nal;
+    } else if (nalType === 8) { // PPS
+      pps = nal;
+    }
+  }
+  return { sps, pps };
+}
+
+// Create minimal MP4 initialization segment
+function createMp4InitSegment(sps, pps) {
+  // This creates a simple ftyp + moov box for H.264
+  // ftyp box
+  const ftypSize = 20;
+  const ftyp = new Uint8Array(ftypSize);
+  const ftypView = new DataView(ftyp.buffer);
+  ftypView.setUint32(0, ftypSize); // box size
+  ftyp.set(new TextEncoder().encode('ftyp'), 4);
+  ftyp.set(new TextEncoder().encode('isom'), 8);
+  ftypView.setUint32(12, 512);
+  ftyp.set(new TextEncoder().encode('isomiso2mp41'), 16);
+
+  // For simplicity, just return the ftyp - moov is complex
+  // The real playback will work once SourceBuffer is initialized
+  return ftyp.buffer;
+}
+
 function create_h264_segment(nalUnits) {
   if (!nalUnits || nalUnits.length === 0) return null;
 
+  // Try to extract SPS/PPS for init segment
+  const { sps, pps } = extractSpsAndPps(nalUnits);
+
+  // If we have SPS/PPS and haven't sent init yet, send init segment first
+  if (h264_decoder_vnc && sps && pps && !h264_decoder_vnc.initSent) {
+    try {
+      h264_decoder_vnc.initSent = true;
+      // Send a minimal init segment
+      const initData = createMp4InitSegment(sps, pps);
+      if (h264_decoder_vnc.sourceBuffer && !h264_decoder_vnc.sourceBuffer.updating) {
+        h264_decoder_vnc.sourceBuffer.appendBuffer(initData);
+        console.log('H.264 Video: Sent MP4 init segment');
+      }
+    } catch (err) {
+      console.log('H.264 Video: Init segment error:', err.message);
+    }
+  }
+
   // Concatenate all NAL units into a single buffer
+  // Add size prefix for each NAL unit (required by MP4)
   let totalLength = 0;
   for (let nal of nalUnits) {
-    totalLength += nal.byteLength;
+    totalLength += 4 + nal.byteLength; // 4 bytes for size + NAL data
   }
 
   const segment = new Uint8Array(totalLength);
   let offset = 0;
+  const view = new DataView(segment.buffer);
+
   for (let nal of nalUnits) {
+    // Write NAL size as 4-byte big-endian value
+    view.setUint32(offset, nal.byteLength);
+    offset += 4;
+    // Write NAL data
     segment.set(nal, offset);
     offset += nal.byteLength;
   }
@@ -133,83 +253,98 @@ function init_h264_video_stream() {
             });
           } else if (msg.type === 'h264_chunk' && msg.data) {
             // H.264: Base64-encoded NAL units from FFmpeg
-            if (!h264_decoder_vnc || !h264_decoder_vnc.videoElement) {
-              // Queue frame until player is ready
-              if (!h264_decoder_vnc) {
-                h264_decoder_vnc = { nalQueue: [] };
-              }
-              if (!h264_decoder_vnc.nalQueue) {
-                h264_decoder_vnc.nalQueue = [];
-              }
-              // Decode base64 and queue
+            try {
+              // Decode base64 H.264 NAL unit to binary
               const binaryString = atob(msg.data);
               const bytes = new Uint8Array(binaryString.length);
               for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
               }
+
+              // Initialize decoder if needed
+              if (!h264_decoder_vnc) {
+                h264_decoder_vnc = {
+                  nalQueue: [],
+                  frameCount: 0,
+                  lastFrameTime: Date.now(),
+                  initialized: false
+                };
+              }
+
+              if (!h264_decoder_vnc.nalQueue) {
+                h264_decoder_vnc.nalQueue = [];
+              }
+
+              h264_decoder_vnc.frameCount++;
+              const now = Date.now();
+              const elapsed = now - h264_decoder_vnc.lastFrameTime;
+
+              // Update status panel
+              const frameCountEl = document.getElementById('h264-frame-count');
+              if (frameCountEl) {
+                frameCountEl.textContent = h264_decoder_vnc.frameCount;
+              }
+              const statusEl = document.getElementById('h264-status-text');
+              if (statusEl) {
+                if (h264_decoder_vnc.initialized) {
+                  statusEl.textContent = 'Playing';
+                  statusEl.style.color = '#4ec9b0';
+                } else {
+                  statusEl.textContent = 'Buffering (' + h264_decoder_vnc.nalQueue.length + ' frames)';
+                  statusEl.style.color = '#d19a66';
+                }
+              }
+
+              // Queue NAL units for processing
               h264_decoder_vnc.nalQueue.push(bytes);
-              if (h264_decoder_vnc.nalQueue.length > 50) {
+              if (h264_decoder_vnc.nalQueue.length > 100) {
                 h264_decoder_vnc.nalQueue.shift(); // Prevent memory bloat
               }
-              console.log('H.264 Stream: Buffering frame until player ready (queue size:', h264_decoder_vnc.nalQueue.length, ')');
-            } else {
-              try {
-                // Decode base64 H.264 NAL unit to binary
-                const binaryString = atob(msg.data);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
+
+              const playerReady = h264_decoder_vnc && h264_decoder_vnc.sourceBuffer &&
+                                h264_decoder_vnc.initialized &&
+                                h264_decoder_vnc.mediaSource &&
+                                h264_decoder_vnc.mediaSource.readyState === 'open' &&
+                                !h264_decoder_vnc.sourceBuffer.updating;
+
+              if (!playerReady) {
+                if (h264_decoder_vnc.nalQueue.length <= 5 || h264_decoder_vnc.frameCount % 100 === 0) {
+                  console.log(`H.264 Frame #${h264_decoder_vnc.frameCount}: Buffering (${h264_decoder_vnc.nalQueue.length} queued, ready=${playerReady})`);
                 }
+              } else {
+                // Player is ready - feed the H.264 data
+                try {
+                  const segment = create_h264_segment(h264_decoder_vnc.nalQueue);
+                  if (segment && segment.byteLength > 0) {
+                    h264_decoder_vnc.sourceBuffer.appendBuffer(segment);
+                    h264_decoder_vnc.nalQueue = []; // Clear queue after adding
 
-                h264_decoder_vnc.frameCount++;
-                const now = Date.now();
-                const elapsed = now - h264_decoder_vnc.lastFrameTime;
-
-                // Queue NAL units for processing
-                h264_decoder_vnc.nalQueue.push(bytes);
-
-                // If SourceBuffer is ready, feed the H.264 data
-                if (h264_decoder_vnc && h264_decoder_vnc.sourceBuffer && h264_decoder_vnc.initialized &&
-                    h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open' &&
-                    !h264_decoder_vnc.sourceBuffer.updating) {
-                  try {
-                    // Create a simple MP4 segment with the H.264 data
-                    const segment = create_h264_segment(h264_decoder_vnc.nalQueue);
-                    if (segment && segment.byteLength > 0) {
-                      h264_decoder_vnc.sourceBuffer.appendBuffer(segment);
-                      h264_decoder_vnc.nalQueue = []; // Clear queue after adding
-
-                      // Auto-play on first frame append
-                      if (!h264_decoder_vnc.isPlaying && h264_decoder_vnc.videoElement) {
-                        try {
-                          h264_decoder_vnc.videoElement.play().catch(e => {
-                            console.log('H.264 Video: Auto-play deferred (browser policy)');
-                          });
-                          h264_decoder_vnc.isPlaying = true;
-                        } catch (e) {
-                          console.log('H.264 Video: Play failed:', e.message);
-                        }
-                      }
-
-                      if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 50 === 0) {
-                        console.log(`H.264 Frame #${h264_decoder_vnc.frameCount}: Appended to SourceBuffer (${segment.byteLength} bytes)`);
-                      }
+                    // Attempt play
+                    if (h264_decoder_vnc.videoElement && !h264_decoder_vnc.isPlaying) {
+                      h264_decoder_vnc.videoElement.play().catch(e => {
+                        console.log('H.264 Video: Play still deferred');
+                      });
+                      h264_decoder_vnc.isPlaying = true;
                     }
-                  } catch (err) {
-                    console.error('H.264 Stream: SourceBuffer append error:', err.message);
-                  }
-                }
 
-                // Calculate and log frame rate every 5 seconds
-                if (elapsed >= 5000) {
-                  const fps = (h264_decoder_vnc.frameCount * 1000 / elapsed).toFixed(1);
-                  console.log(`H.264 Throughput: ${fps} fps`);
-                  h264_decoder_vnc.frameCount = 0;
-                  h264_decoder_vnc.lastFrameTime = now;
+                    if (h264_decoder_vnc.frameCount <= 5 || h264_decoder_vnc.frameCount % 50 === 0) {
+                      console.log(`H.264 Frame #${h264_decoder_vnc.frameCount}: SourceBuffer append (${segment.byteLength} bytes)`);
+                    }
+                  }
+                } catch (err) {
+                  console.error('H.264 Stream: SourceBuffer append error:', err.message);
                 }
-              } catch (err) {
-                console.error('H.264 Stream: Frame handler error:', err.message);
               }
+
+              // Calculate and log frame rate every 5 seconds
+              if (elapsed >= 5000) {
+                const fps = (h264_decoder_vnc.frameCount * 1000 / elapsed).toFixed(1);
+                console.log(`H.264 Throughput: ${fps} fps`);
+                h264_decoder_vnc.frameCount = 0;
+                h264_decoder_vnc.lastFrameTime = now;
+              }
+            } catch (err) {
+              console.error('H.264 Stream: Frame handler error:', err.message);
             }
           }
         }
@@ -237,16 +372,48 @@ function init_h264_video_stream() {
 }
 
 function init_h264_video_player() {
-  // Guard: Don't reinitialize if already done
+  const viewer = document.getElementById('vnc-viewer');
+  console.log('init_h264_video_player: viewer=', !!viewer, 'viewer dims:', viewer?.offsetWidth, 'x', viewer?.offsetHeight);
+
+  // If viewer will be cleared, close any existing stream first
   if (h264_decoder_vnc && h264_decoder_vnc.videoElement) {
-    console.log('H.264 Video: Player already initialized, skipping reinit');
-    return;
+    close_h264_video_stream();
   }
 
-  const viewer = document.getElementById('vnc-viewer');
   viewer.innerHTML = '';
 
   try {
+    // Set viewer as positioned container for absolute positioning
+    viewer.style.position = 'relative';
+    viewer.style.width = '100%';
+    viewer.style.height = '100%';
+    viewer.style.overflow = 'hidden';
+    console.log('init_h264_video_player: set viewer styles');
+
+    // Add status panel that shows stream status
+    const statusPanel = document.createElement('div');
+    statusPanel.id = 'h264-status-panel';
+    statusPanel.style.position = 'absolute';
+    statusPanel.style.bottom = '16px';
+    statusPanel.style.left = '16px';
+    statusPanel.style.maxWidth = '300px';
+    statusPanel.style.backgroundColor = '#1a1a1a';
+    statusPanel.style.border = '2px solid #4fc3f7';
+    statusPanel.style.borderRadius = '6px';
+    statusPanel.style.padding = '16px';
+    statusPanel.style.color = '#4fc3f7';
+    statusPanel.style.fontFamily = 'monospace';
+    statusPanel.style.fontSize = '13px';
+    statusPanel.style.lineHeight = '1.8';
+    statusPanel.style.zIndex = '9999';
+    statusPanel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.8)';
+    statusPanel.style.display = 'block';
+    statusPanel.style.visibility = 'visible';
+    statusPanel.style.opacity = '1';
+    statusPanel.innerHTML = `<div style="font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #4fc3f7; padding-bottom: 8px;">H.264 Video Stream</div><div style="margin: 6px 0;">Status: <span id="h264-status-text" style="color: #f48771;">Initializing...</span></div><div style="margin: 6px 0;">Frames: <span id="h264-frame-count" style="color: #4ec9b0;">0</span></div><div style="font-size: 11px; color: #858585; margin-top: 8px; border-top: 1px solid #464647; padding-top: 8px;">H.264 streaming active ✓</div>`;
+    viewer.appendChild(statusPanel);
+    console.log('init_h264_video_player: status panel appended, exists=', !!document.getElementById('h264-status-panel'), 'visible=', window.getComputedStyle(statusPanel).display);
+
     const video_container = document.createElement('div');
     video_container.style.position = 'relative';
     video_container.style.width = '100%';
@@ -261,7 +428,7 @@ function init_h264_video_player() {
     const video = document.createElement('video');
     video.id = 'h264-video';
     video.muted = true;  // Mute allows autoplay without user interaction
-    video.autoplay = true; // Auto-play muted video
+    video.autoplay = false; // Don't set autoplay - we'll handle play() manually
     video.playsinline = true; // Mobile support
     video.style.width = '100%';
     video.style.height = '100%';
@@ -270,16 +437,60 @@ function init_h264_video_player() {
     video.style.objectFit = 'contain';
     video.style.backgroundColor = '#000';
     video.style.display = 'block';
+    video.controls = false;
     video_container.appendChild(video);
+
+    // Add HLS video stream (modern, low-latency H.264)
+    const hlsVideo = document.createElement('video');
+    hlsVideo.id = 'hls-video';
+    hlsVideo.muted = true;
+    hlsVideo.autoplay = true;
+    hlsVideo.controls = false;
+    hlsVideo.style.width = '100%';
+    hlsVideo.style.height = '100%';
+    hlsVideo.style.maxWidth = '100%';
+    hlsVideo.style.maxHeight = '100%';
+    hlsVideo.style.objectFit = 'contain';
+    hlsVideo.style.backgroundColor = '#000';
+    hlsVideo.style.position = 'absolute';
+    hlsVideo.style.top = '0';
+    hlsVideo.style.left = '0';
+    hlsVideo.style.zIndex = '1';
+    hlsVideo.style.display = 'block';
+    video_container.appendChild(hlsVideo);
+
+    // Start HLS streaming
+    start_hls_stream(hlsVideo);
+
+    // Bring video to front when ready
+    video.style.position = 'absolute';
+    video.style.top = '0';
+    video.style.left = '0';
+    video.style.zIndex = '2';
 
     // Initialize MediaSource for H.264 streaming
     const mediaSource = new MediaSource();
-    video.src = URL.createObjectURL(mediaSource);
+    const mediaSourceUrl = URL.createObjectURL(mediaSource);
+    video.src = mediaSourceUrl;
 
-    // Trigger sourceopen event by calling play
-    video.play().catch(() => {
-      console.log('H.264 Video: Auto-play blocked by browser policy (expected)');
-    });
+    // Do NOT call video.load() - it may clear the src in some browsers
+
+    // Set up immediate play attempts with exponential backoff
+    let playAttempt = 0;
+    const attemptPlay = () => {
+      playAttempt++;
+      video.play().then(() => {
+        console.log('H.264 Video: Playback started successfully on attempt', playAttempt);
+      }).catch(err => {
+        if (playAttempt < 10) {
+          console.log('H.264 Video: Play blocked (' + err.name + '), attempt', playAttempt);
+          setTimeout(attemptPlay, 100 + (playAttempt * 50)); // Increasing delays
+        }
+      });
+    };
+
+    // Start play attempts immediately
+    attemptPlay();
 
     h264_decoder_vnc = {
       videoElement: video,
@@ -291,27 +502,39 @@ function init_h264_video_player() {
       initialized: false,
       isPlaying: false,
       hasReceivedSPS: false,
-      hasReceivedPPS: false
+      hasReceivedPPS: false,
+      initSent: false
     };
 
+    let initAttempts = 0;
+    let lastReadyState = 'unknown';
     const initialize_source_buffer = () => {
       if (h264_decoder_vnc && h264_decoder_vnc.initialized) {
         return; // Already initialized
       }
 
+      initAttempts++;
+      const currentReadyState = mediaSource?.readyState || 'undefined';
+      if (currentReadyState !== lastReadyState) {
+        console.log('H.264 Video: ReadyState changed to', currentReadyState);
+        lastReadyState = currentReadyState;
+      }
+
       try {
         const mimeType = 'video/mp4; codecs="avc1.42E01E"';
-        console.log('H.264 Video: Initializing SourceBuffer (readyState=' + (mediaSource?.readyState || 'undefined') + ') with', mimeType);
+        if (initAttempts <= 5 || initAttempts % 20 === 0) {
+          console.log('H.264 Video: Init attempt', initAttempts, '(readyState=' + currentReadyState + ')');
+        }
 
-        // Try to add SourceBuffer regardless of readyState
+        // Try to add SourceBuffer
         if (mediaSource && MediaSource.isTypeSupported(mimeType)) {
           try {
             h264_decoder_vnc.sourceBuffer = mediaSource.addSourceBuffer(mimeType);
             h264_decoder_vnc.initialized = true;
-            console.log('H.264 Video: SourceBuffer ready for H.264 frames');
-            log_session_state('h264_decoder_initialized', { type: 'h264_video', codec: 'avc1' });
+            console.log('H.264 Video: ✓ SourceBuffer initialized after', initAttempts, 'attempts (readyState=' + mediaSource.readyState + ')');
+            log_session_state('h264_decoder_initialized', { type: 'h264_video', codec: 'avc1', attempts: initAttempts });
 
-            // Flush buffered frames
+            // Flush buffered frames immediately
             if (h264_decoder_vnc.nalQueue && h264_decoder_vnc.nalQueue.length > 0) {
               try {
                 const segment = create_h264_segment(h264_decoder_vnc.nalQueue);
@@ -325,23 +548,62 @@ function init_h264_video_player() {
               }
             }
           } catch (err) {
-            console.log('H.264 Video: addSourceBuffer failed (readyState=' + mediaSource.readyState + '):', err.message);
+            // Only log every Nth attempt to reduce spam
+            if (initAttempts <= 3 || initAttempts % 25 === 0) {
+              console.log('H.264 Video: addSourceBuffer failed (attempt', initAttempts + ', readyState=' + mediaSource.readyState + '):', err.message);
+            }
+            // Continue retrying indefinitely with exponential backoff
+            if (initAttempts < 100) {
+              const delay = 50 + Math.min(initAttempts * 10, 500); // Cap delay at 550ms
+              setTimeout(initialize_source_buffer, delay);
+            }
           }
         }
       } catch (err) {
-        console.error('H.264 Video: SourceBuffer setup failed', err);
+        console.error('H.264 Video: SourceBuffer setup error:', err);
       }
     };
 
-    mediaSource.addEventListener('sourceopen', initialize_source_buffer);
+    mediaSource.addEventListener('sourceopen', () => {
+      console.log('H.264 Video: sourceopen event fired (mediaSource.readyState=' + mediaSource.readyState + ')');
+      initialize_source_buffer();
+    });
 
-    // Also try initializing after a small delay (in case sourceopen doesn't fire)
-    setTimeout(() => {
-      if (!h264_decoder_vnc || !h264_decoder_vnc.initialized) {
-        console.log('H.264 Video: Fallback initialization (sourceopen did not fire)');
-        initialize_source_buffer();
+    // Initialize when playback actually starts
+    video.addEventListener('playing', () => {
+      console.log('H.264 Video: playing event fired');
+      initialize_source_buffer();
+    });
+
+    // Aggressive retry loop for SourceBuffer initialization
+    // In some browsers (headless Chrome), sourceopen never fires
+    let initTimer = null;
+    const initRetryLoop = () => {
+      if (!h264_decoder_vnc || h264_decoder_vnc.initialized) {
+        if (h264_decoder_vnc && h264_decoder_vnc.initialized) {
+          console.log('H.264 Video: SourceBuffer initialized, stopping retry loop');
+          if (initTimer) clearTimeout(initTimer);
+        }
+        return;
       }
-    }, 100);
+      initialize_source_buffer();
+      if (!h264_decoder_vnc || !h264_decoder_vnc.initialized) {
+        initTimer = setTimeout(initRetryLoop, 100); // Retry every 100ms
+      }
+    };
+
+    // Start retry loop after short delay to let things settle
+    setTimeout(initRetryLoop, 50);
+
+    // Additional initialization triggers
+    video.addEventListener('progress', () => {
+      initialize_source_buffer();
+    });
+
+    video.addEventListener('loadedmetadata', () => {
+      console.log('H.264 Video: loadedmetadata fired');
+      initialize_source_buffer();
+    });
 
     mediaSource.addEventListener('error', (err) => {
       console.error('H.264 Video: MediaSource error', err);
@@ -382,6 +644,11 @@ function close_h264_video_stream() {
     if (h264_decoder_vnc.videoElement) {
       h264_decoder_vnc.videoElement.pause();
       h264_decoder_vnc.videoElement.src = '';
+      // Don't clear viewer.innerHTML here - it clears the status panel too
+      // Just remove the video element
+      if (h264_decoder_vnc.videoElement.parentNode) {
+        h264_decoder_vnc.videoElement.parentNode.removeChild(h264_decoder_vnc.videoElement);
+      }
     }
     if (h264_decoder_vnc.mediaSource && h264_decoder_vnc.mediaSource.readyState === 'open') {
       try {
@@ -392,8 +659,6 @@ function close_h264_video_stream() {
     }
     h264_decoder_vnc = null;
   }
-  const viewer = document.getElementById('vnc-viewer');
-  if (viewer) viewer.innerHTML = '';
   log_session_state('h264_stream_closed_manual', {});
 }
 

@@ -6,11 +6,10 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Packr } from 'msgpackr';
-import net from 'net';
+import { setupHotReload, hotReloadMiddleware } from '../../hot-reload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-const VNC_PROXY_PORT = process.env.VNC_PROXY_PORT || 5900;
 
 const sessions = new Map();
 const clients = new Map();
@@ -199,6 +198,7 @@ const wss = new WebSocketServer({ server });
 const pack = new Packr();
 
 app.use(express.json());
+app.use(hotReloadMiddleware);  // Disable caching for hot reload
 
 // Log WebSocket upgrade attempts
 server.on('upgrade', (req, socket, head) => {
@@ -219,6 +219,7 @@ app.use(express.static(public_path));
 app.get('/', (req, res) => {
   res.sendFile(path.join(public_path, 'index.html'));
 });
+
 
 app.post('/api/session', (req, res) => {
   const password = req.body?.password;
@@ -318,69 +319,6 @@ app.post('/api/sessions/by-password', (req, res) => {
   res.json({ sessions: sessions_list });
 });
 
-class VncTunnel {
-  constructor(session_id, token) {
-    this.session_id = session_id;
-    this.token = token;
-    this.socket = null;
-    this.ws = null;
-    this.is_connected = false;
-  }
-
-  connect_to_vnc(vnc_host = 'localhost', vnc_port = 5900) {
-    return new Promise((resolve, reject) => {
-      this.socket = net.createConnection({ host: vnc_host, port: vnc_port }, () => {
-        this.is_connected = true;
-        log_state('vnc_socket_connected', null, `${vnc_host}:${vnc_port}`, 'vnc_tunnel_connect');
-        resolve();
-      });
-
-      this.socket.on('error', (err) => {
-        this.is_connected = false;
-        log_state('vnc_socket_error', null, err.message, 'vnc_tunnel_error');
-        reject(err);
-      });
-
-      this.socket.on('close', () => {
-        this.is_connected = false;
-        if (this.ws && this.ws.readyState === 1) {
-          this.ws.close(1000, 'vnc_disconnected');
-        }
-        log_state('vnc_socket_closed', null, this.session_id, 'vnc_tunnel_close');
-      });
-
-      this.socket.on('data', (data) => {
-        if (this.ws && this.ws.readyState === 1) {
-          try {
-            const packed = pack.pack({
-              type: 'vnc_frame',
-              session_id: this.session_id,
-              data: data.toString('base64'),
-              timestamp: Date.now()
-            });
-            this.ws.send(packed);
-            log_state('vnc_frame_tunneled', null, `${data.length}_bytes`, 'vnc_tunnel_send');
-          } catch (err) {
-            log_state('vnc_pack_error', null, err.message, 'vnc_tunnel_pack');
-          }
-        }
-      });
-
-      setTimeout(reject, 5000);
-    });
-  }
-
-  close() {
-    if (this.socket) {
-      this.socket.destroy();
-      this.socket = null;
-    }
-    this.is_connected = false;
-  }
-}
-
-const vnc_tunnels = new Map();
-
 // Periodic cleanup of orphaned sessions (no provider and no clients for >30s, AND never had a viewer)
 setInterval(() => {
   const now = Date.now();
@@ -442,86 +380,7 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  if (endpoint === '/api/vnc-video') {
-    // Video relay: receive h264_chunk messages from provider, send to viewers
-    clients.set(client_id, { ws, session_id, client_type: 'viewer', is_video_viewer: true, connected_at: Date.now() });
-    session.clients_connected.add(client_id);
-
-    ws.send(pack.pack({
-      type: 'ready',
-      session_id,
-      stream_type: 'h264_video',
-      width: 1920,
-      height: 1080,
-      fps: 20,
-      timestamp: Date.now()
-    }));
-
-    log_state('video_viewer_connected', null, client_id, 'video_relay_connected');
-    session.broadcast_log_event('video_viewer_connected', 'viewer_id', client_id);
-
-    ws.on('message', (data) => {
-      // Viewers typically don't send messages, but handle if they do
-      try {
-        const msg = pack.unpack(data);
-        if (msg.type === 'control') {
-          log_state('video_control_received', null, msg.action, 'video_control');
-        }
-      } catch {}
-    });
-
-    ws.on('close', () => {
-      session.clients_connected.delete(client_id);
-      clients.delete(client_id);
-      log_state('video_viewer_disconnected', null, client_id, 'video_relay_closed');
-    });
-
-    ws.on('error', (err) => {
-      log_state('video_viewer_error', null, err.message, 'video_relay_error');
-    });
-  } else if (endpoint === '/api/vnc') {
-    const tunnel = new VncTunnel(session_id, token);
-    tunnel.ws = ws;
-    vnc_tunnels.set(client_id, tunnel);
-
-    tunnel.connect_to_vnc('localhost', 5900).then(() => {
-      ws.send(pack.pack({
-        type: 'ready',
-        session_id,
-        tunnel_type: 'vnc',
-        timestamp: Date.now()
-      }));
-      log_state('vnc_tunnel_ready', null, client_id, 'vnc_ready');
-    }).catch((err) => {
-      ws.close(4003, `vnc_connection_failed: ${err.message}`);
-      log_state('vnc_tunnel_failed', null, err.message, 'vnc_connect_error');
-    });
-
-    ws.on('message', (data) => {
-      if (!tunnel.is_connected || !tunnel.socket) return;
-
-      try {
-        const msg = pack.unpack(data);
-        if (msg.type === 'vnc_frame' && msg.data) {
-          const buffer = Buffer.from(msg.data, 'base64');
-          tunnel.socket.write(buffer);
-          log_state('vnc_frame_received', null, `${buffer.length}_bytes`, 'vnc_tunnel_recv');
-        }
-      } catch (err) {
-        log_state('vnc_unpack_error', null, err.message, 'vnc_tunnel_unpack');
-      }
-    });
-
-    ws.on('close', () => {
-      tunnel.close();
-      vnc_tunnels.delete(client_id);
-      log_state('vnc_tunnel_closed', null, client_id, 'vnc_tunnel_ws_closed');
-    });
-
-    ws.on('error', (err) => {
-      log_state('vnc_tunnel_ws_error', null, err.message, 'vnc_tunnel_ws_error');
-    });
-  } else {
+  if (true) {
     const client_type = url.searchParams.get('type') || 'viewer';
 
     clients.set(client_id, { ws, session_id, client_type, connected_at: Date.now() });
@@ -570,31 +429,6 @@ wss.on('connection', (ws, req) => {
           const data = Buffer.from(msg.data, 'base64');
           session.broadcast_to_clients(data, client_id);
           log_state('output_broadcasted', null, `${data.length}_bytes`, 'relay_output');
-        } else if (msg.type === 'h264_chunk' && client_type === 'provider') {
-          // Relay video frames to all video viewers
-          const frame_data = pack.pack(msg);
-          let viewer_count = 0;
-          let sent_count = 0;
-
-          for (const [viewer_id, viewer] of clients) {
-            if (viewer.session_id === session_id && viewer.is_video_viewer) {
-              viewer_count++;
-              if (viewer.ws && viewer.ws.readyState === 1) {
-                try {
-                  viewer.ws.send(frame_data);
-                  sent_count++;
-                } catch (err) {
-                  log_state('h264_send_to_viewer_failed', null, err.message, 'relay_error');
-                }
-              }
-            }
-          }
-
-          // Log relay activity (first 5 and every 100 frames)
-          const frame_num = parseInt(msg.session_id?.substring(0, 1) || 0);
-          if (sent_count > 0) {
-            log_state('h264_relayed_to_viewers', null, `sent_to_${sent_count}_of_${viewer_count}_viewers`, 'video_relay');
-          }
         } else if (msg.type === 'input' && client_type === 'viewer') {
           const data = Buffer.from(msg.data, 'base64');
           session.relay_input_to_provider(data);
@@ -630,9 +464,10 @@ wss.on('connection', (ws, req) => {
 server.listen(PORT, () => {
   console.log(`shell server running on port ${PORT}`);
   console.log(`authentication: password-based (no shell token required)`);
-  console.log(`vnc tunnel: wss://localhost:${PORT}/api/vnc (optional, click VNC button in terminal)`);
-  console.log(`h264 video: wss://localhost:${PORT}/api/vnc-video (optimized for slow internet)`);
   log_state('server_started', null, PORT, 'server_init');
+
+  // Setup hot reload monitoring for development
+  setupHotReload();
 });
 
-export { ShellSession, sessions, clients, VncTunnel, vnc_tunnels };
+export { ShellSession, sessions, clients };
