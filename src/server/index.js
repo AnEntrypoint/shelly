@@ -30,14 +30,8 @@ const USER_FACING_EVENTS = new Set([
   'shell_provider_connected',
   'shell_provider_disconnected',
   'viewer_connected',
-  'vnc_tunnel_ready',
-  'vnc_socket_error',
   'ws_auth_failed',
   'server_started',
-  'h264_stream_started',
-  'h264_stream_closed',
-  'h264_send_error',
-  'vnc_tunnel_failed',
   'session_created_password'
 ]);
 
