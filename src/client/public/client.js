@@ -308,11 +308,24 @@ function init_terminal_for_session(session_id) {
 
     term.attachCustomKeyEventHandler((arg) => {
       if (arg.type === 'keydown') {
+        // Send Ctrl+C as SIGINT (0x03) to the remote shell
         if (arg.ctrlKey && arg.code === 'KeyC' && !arg.shiftKey) {
+          send_terminal_input('\x03');
+          return true; // Prevent browser default
+        }
+        // Send Ctrl+Z as SIGTSTP (0x1A)
+        if (arg.ctrlKey && arg.code === 'KeyZ' && !arg.shiftKey) {
+          send_terminal_input('\x1A');
           return true;
         }
-        if ((arg.ctrlKey || arg.metaKey) && arg.code === 'KeyV' && arg.shiftKey) {
+        // Send Ctrl+D as EOF (0x04)
+        if (arg.ctrlKey && arg.code === 'KeyD' && !arg.shiftKey) {
+          send_terminal_input('\x04');
           return true;
+        }
+        // Allow Ctrl+V for paste (handled by browser)
+        if ((arg.ctrlKey || arg.metaKey) && arg.code === 'KeyV' && arg.shiftKey) {
+          return false; // Let browser handle paste
         }
       }
       return false;
@@ -381,47 +394,18 @@ function init_terminal_for_session(session_id) {
     };
 
     term.onData((data) => {
-      console.log('XTERM_ONDATA_FIRED', { session_id, data_len: data.length });
+      console.log('XTERM_ONDATA_FIRED', { session_id, data_len: data.length, data_hex: Array.from(data).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ') });
       send_terminal_input(data);
     });
 
-    // Fallback: Listen directly to the xterm textarea for keyboard input
-    // This handles cases where xterm's onData doesn't fire
-    setTimeout(() => {
+    // Ensure the textarea receives input by focusing it when terminal is focused
+    // This enables keyboard input to be captured by xterm
+    term.onKey((event) => {
       const textarea = document.querySelector('.xterm-helper-textarea');
-      if (textarea) {
-        // Track the last sent input to avoid duplicates
-        let last_sent_input = '';
-
-        // Listen for paste events
-        textarea.addEventListener('paste', (e) => {
-          const pasted_text = (e.clipboardData || window.clipboardData).getData('text');
-          if (pasted_text) {
-            send_terminal_input(pasted_text);
-            e.preventDefault();
-          }
-        });
-
-        // Monitor for ANY change - xterm clears textarea after each character,
-        // so we need to send input based on what appears in the textarea
-        const checkForInput = () => {
-          const current_text = textarea.value;
-          if (current_text && current_text !== last_sent_input) {
-            // Send only the new characters that appeared
-            send_terminal_input(current_text);
-            last_sent_input = current_text; // Remember what we sent
-            // Clear textarea to signal we've processed it
-            textarea.value = '';
-          }
-        };
-
-        // Poll frequently to catch input before it's cleared
-        textarea.addEventListener('keydown', checkForInput);
-        textarea.addEventListener('input', checkForInput);
-
-        console.log('TEXTAREA_INPUT_LISTENER_ADDED', { session_id });
+      if (textarea && document.activeElement !== textarea) {
+        textarea.focus();
       }
-    }, 50);
+    });
 
     const fit_to_viewport = () => {
       try {
@@ -665,12 +649,15 @@ async function connectToSession(session_id = null) {
 
         if (session.term) {
           if (msg.type === 'ready') {
-            session.term.write('\r\n[Session ready]\r\n');
+            // Silently acknowledge session ready, don't write to terminal
+            // (This reduces noise for TUI apps)
           } else if (msg.type === 'buffer' && msg.data) {
             const decoded = atob(msg.data);
+            // Write buffer data (reconnection history)
             session.term.write(decoded);
           } else if (msg.type === 'output' && msg.data) {
             const decoded = atob(msg.data);
+            // Write live output directly - xterm.js will handle all ANSI sequences
             session.term.write(decoded);
           }
         }

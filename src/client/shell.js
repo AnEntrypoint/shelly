@@ -56,9 +56,24 @@ class PersistentSession {
 
         this.ws.on('message', (data) => {
           try {
-            const msg = JSON.parse(data);
+            let msg;
+            // Handle both JSON and binary MessagePack formats
+            if (typeof data === 'string') {
+              msg = JSON.parse(data);
+            } else {
+              // Binary data - try to decode as JSON for compatibility
+              const decoded_str = Buffer.from(data).toString('utf-8');
+              try {
+                msg = JSON.parse(decoded_str);
+              } catch {
+                // If not JSON, treat as raw output
+                process.stdout.write(data);
+                return;
+              }
+            }
+
             if (msg.type === 'relay_input' && msg.data) {
-              const decoded = Buffer.from(msg.data, 'base64').toString();
+              const decoded = Buffer.from(msg.data, 'base64').toString('utf-8');
               process.stdout.write(decoded);
             }
           } catch (err) {
@@ -156,20 +171,15 @@ class PersistentSession {
     const has_tty = process.stdin.isTTY;
 
     if (has_tty) {
-      this.rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        terminal: true
-      });
+      // For TTY input, we need to handle raw input to support TUI apps
+      // Don't use readline which processes input line-by-line
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf-8');
 
-      const handle_line = (line) => {
-        if (line === '.exit') {
-          log_state('cli_exit_requested', null, true, 'user_exit');
-          this.rl.close();
-          this.ws.close();
-          process.exit(0);
-        }
-        this.send_input(line + '\n');
+      const handle_data = (chunk) => {
+        // Forward raw input directly, including control characters
+        this.send_input(chunk);
       };
 
       const handle_resize = () => {
@@ -181,16 +191,34 @@ class PersistentSession {
         }
       };
 
-      this.rl.on('line', handle_line);
-      process.on('SIGWINCH', handle_resize);
-
-      this.rl.on('close', () => {
+      const handle_exit = () => {
+        log_state('cli_stdin_ended', null, true, 'stdin_close');
         if (this.ws) {
           this.ws.close();
         }
         process.exit(0);
+      };
+
+      process.stdin.on('data', handle_data);
+      process.stdin.on('end', handle_exit);
+      process.on('SIGWINCH', handle_resize);
+
+      // Handle Ctrl+C gracefully - forward it to the remote shell
+      process.on('SIGINT', () => {
+        log_state('cli_sigint_received', null, true, 'sigint');
+        this.send_input('\x03');
+      });
+
+      // Clean up on exit
+      process.on('exit', () => {
+        try {
+          process.stdin.setRawMode(false);
+        } catch (err) {
+          // Terminal might already be reset
+        }
       });
     } else {
+      // Non-TTY input (pipe/redirect)
       const handle_stdin = (chunk) => {
         this.send_input(chunk.toString());
       };

@@ -94,10 +94,30 @@ class ShellSession {
 
     const total_len = this.viewport_buffer.reduce((sum, s) => sum + s.length, 0);
     if (total_len > this.max_buffer_size) {
+      // Calculate how much data to drop
       let excess = total_len - this.max_buffer_size;
-      while (excess > 0 && this.viewport_buffer.length > 0) {
-        const first = this.viewport_buffer.shift();
-        excess -= first.length;
+      let chars_to_drop = excess;
+
+      // Drop complete chunks, then trim the first remaining chunk
+      while (chars_to_drop > 0 && this.viewport_buffer.length > 0) {
+        const first = this.viewport_buffer[0];
+        if (first.length <= chars_to_drop) {
+          this.viewport_buffer.shift();
+          chars_to_drop -= first.length;
+        } else {
+          // Trim first chunk intelligently - don't break ANSI escape sequences
+          let trimmed = first.substring(chars_to_drop);
+
+          // If we're in the middle of an escape sequence, try to skip to the next complete one
+          const escape_start = trimmed.indexOf('\x1b[');
+          if (escape_start > 0 && escape_start < 10) {
+            // We might be cutting an escape sequence, skip ahead
+            trimmed = trimmed.substring(escape_start);
+          }
+
+          this.viewport_buffer[0] = trimmed;
+          break;
+        }
       }
     }
   }
