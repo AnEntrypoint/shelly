@@ -304,107 +304,9 @@
     .terminal-instance.active {
       display: block;
     }
-
-    #vnc-button {
-      padding: 6px 12px;
-      background: #d19a66;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: background 0.2s;
-      margin-left: 4px;
-    }
-
-    #vnc-button:hover {
-      background: #c87f47;
-    }
-
-    #vnc-button:disabled {
-      background: #464647;
-      color: #858585;
-      cursor: not-allowed;
-    }
-
-    #vnc-modal {
-      display: none;
-      position: fixed;
-      z-index: 2000;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.9);
-      justify-content: center;
-      align-items: center;
-    }
-
-    #vnc-modal.active {
-      display: flex;
-    }
-
-    #vnc-modal-content {
-      background: #2d2d30;
-      border: 1px solid #464647;
-      border-radius: 6px;
-      width: 90%;
-      max-width: 1200px;
-      height: 90vh;
-      max-height: 800px;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-    }
-
-    #vnc-header {
-      padding: 12px 16px;
-      border-bottom: 1px solid #464647;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #1e1e1e;
-    }
-
-    #vnc-header-title {
-      font-size: 14px;
-      color: #4fc3f7;
-      font-weight: 500;
-    }
-
-    #vnc-close-btn {
-      padding: 4px 8px;
-      background: #464647;
-      color: #d4d4d4;
-      border: none;
-      border-radius: 3px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    #vnc-close-btn:hover {
-      background: #569cd6;
-    }
-
-    #vnc-viewer {
-      flex: 1;
-      overflow: hidden;
-      position: relative;
-    }
   </style>
 </head>
 <body>
-  <div id="vnc-modal">
-    <div id="vnc-modal-content">
-      <div id="vnc-header">
-        <div id="vnc-header-title">Remote Display (VNC)</div>
-        <button id="vnc-close-btn" onclick="toggle_vnc_modal()">Close</button>
-      </div>
-      <div id="vnc-viewer"></div>
-    </div>
-  </div>
-
   <div id="password-modal" class="modal active">
     <div class="modal-content">
       <div class="modal-title">Enter Password</div>
@@ -432,7 +334,6 @@
       </div>
     </div>
     <div class="header-actions">
-      <button id="vnc-button" onclick="toggle_vnc_modal()" disabled>VNC</button>
       <button id="connect-btn" onclick="connectToSession()">Connect</button>
       <button id="disconnect-btn" onclick="disconnectSession()" disabled>Disconnect</button>
     </div>
@@ -454,9 +355,6 @@
   <script src="/lib/xterm.js"></script>
   <script src="/lib/addon-fit.js"></script>
   <script src="/lib/msgpackr.umd.js"></script>
-  <script src="/lib/simple-vnc.js"></script>
-  <script src="/lib/vnc-minimal.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
   <script src="/client.js"></script>
 </body>
 </html>
