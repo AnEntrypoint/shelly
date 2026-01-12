@@ -344,29 +344,28 @@ function init_terminal_for_session(session_id) {
       }
     }, 100);
 
-    // Send terminal input - always fetch fresh session to avoid closure issues
     const send_terminal_input = (data) => {
-      const session = sessions.get(session_id);
+      const sess = sessions.get(session_id);
 
       console.log('SEND_INPUT_CALLED', { session_id, data_length: data.length, data_hex: Array.from(data).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ') });
 
-      if (!session) {
+      if (!sess) {
         console.log('SEND_INPUT_ERROR_NO_SESSION', { session_id });
         return;
       }
 
-      if (!session.ws) {
-        console.log('SEND_INPUT_ERROR_NO_WS', { session_id, is_connected: session.is_connected });
+      if (!sess.ws) {
+        console.log('SEND_INPUT_ERROR_NO_WS', { session_id, is_connected: sess.is_connected });
         return;
       }
 
-      if (session.ws.readyState !== WebSocket.OPEN) {
-        console.log('SEND_INPUT_ERROR_WS_NOT_OPEN', { readyState: session.ws.readyState, state_name: ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.ws.readyState] });
+      if (sess.ws.readyState !== WebSocket.OPEN) {
+        console.log('SEND_INPUT_ERROR_WS_NOT_OPEN', { readyState: sess.ws.readyState, state_name: ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][sess.ws.readyState] });
         return;
       }
 
-      if (!session.is_connected) {
-        console.log('SEND_INPUT_ERROR_NOT_CONNECTED', { is_connected: session.is_connected });
+      if (!sess.is_connected) {
+        console.log('SEND_INPUT_ERROR_NOT_CONNECTED', { is_connected: sess.is_connected });
         return;
       }
 
@@ -381,14 +380,14 @@ function init_terminal_for_session(session_id) {
         if (packer) {
           try {
             const packed = packer.pack(msg);
-            session.ws.send(packed);
+            sess.ws.send(packed);
             console.log('SEND_INPUT_SUCCESS_PACKED', { session_id, bytes: data.length });
           } catch (packErr) {
-            session.ws.send(JSON.stringify(msg));
+            sess.ws.send(JSON.stringify(msg));
             console.log('SEND_INPUT_SUCCESS_JSON', { session_id, bytes: data.length });
           }
         } else {
-          session.ws.send(JSON.stringify(msg));
+          sess.ws.send(JSON.stringify(msg));
           console.log('SEND_INPUT_SUCCESS_JSON', { session_id, bytes: data.length });
         }
         log_session_state('input_sent', { session_id, bytes: data.length });
@@ -458,12 +457,16 @@ function init_terminal_for_session(session_id) {
     document.addEventListener('fullscreenchange', fit_to_viewport);
     document.addEventListener('webkitfullscreenchange', fit_to_viewport);
 
-    session.term = term;
-    session.fitAddon = fitAddon;
+    const sessionObj = sessions.get(session_id);
+    if (sessionObj) {
+      sessionObj.term = term;
+      sessionObj.fitAddon = fitAddon;
+    }
     log_session_state('terminal_initialized', { session_id });
     return true;
   } catch (err) {
-    log_session_state('terminal_init_error', { session_id, reason: 'initialization_failed', error: err.message });
+    console.error('TERMINAL_INIT_ERROR_DETAILS:', { error: err.message, stack: err.stack, name: err.name });
+    log_session_state('terminal_init_error', { session_id, reason: 'initialization_failed', error: err.message, stack: err.stack });
     return false;
   }
 }
