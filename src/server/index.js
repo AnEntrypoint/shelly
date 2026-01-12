@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Packr } from 'msgpackr';
-import { setupHotReload, hotReloadMiddleware } from '../../hot-reload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -212,7 +211,6 @@ const wss = new WebSocketServer({ server });
 const pack = new Packr();
 
 app.use(express.json());
-app.use(hotReloadMiddleware);  // Disable caching for hot reload
 
 // Log WebSocket upgrade attempts
 server.on('upgrade', (req, socket, head) => {
@@ -479,9 +477,6 @@ server.listen(PORT, () => {
   console.log(`shell server running on port ${PORT}`);
   console.log(`authentication: password-based (no shell token required)`);
   log_state('server_started', null, PORT, 'server_init');
-
-  // Setup hot reload monitoring for development
-  setupHotReload();
 });
 
 export { ShellSession, sessions, clients };
