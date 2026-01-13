@@ -259,14 +259,21 @@ function init_terminal_for_session(session_id) {
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: font_size,
-      fontFamily: "'Menlo', 'Consolas', 'Monaco', 'Ubuntu Mono', 'Courier New', monospace",
-      lineHeight: 1.3,
+      fontFamily: "'Cascadia Code', 'JetBrains Mono', 'FiraCode', 'Menlo', 'Consolas', 'Monaco', 'Ubuntu Mono', 'Courier New', monospace",
+      fontWeight: 'normal',
+      fontWeightBold: 'bold',
+      lineHeight: 1.2,
       letterSpacing: 0,
       scrollback: 1000,
       theme,
       allowProposedApi: true,
       windowsMode: false,
-      fastScrollSensitivity: 5
+      fastScrollSensitivity: 5,
+      convertEol: true,
+      screenReaderMode: false,
+      macOptionIsMeta: true,
+      metaKeyBindings: 'auto',
+      enableBold: true
     });
 
     let fitAddon;
@@ -310,10 +317,11 @@ function init_terminal_for_session(session_id) {
 
     term.attachCustomKeyEventHandler((arg) => {
       if (arg.type === 'keydown') {
-        // Send Ctrl+C as SIGINT (0x03) to the remote shell
+        // ONLY intercept control sequences that xterm doesn't handle well
+        // Send Ctrl+C as SIGINT (0x03) - xterm needs help with this
         if (arg.ctrlKey && arg.code === 'KeyC' && !arg.shiftKey) {
           send_terminal_input('\x03');
-          return true; // Prevent browser default
+          return true;
         }
         // Send Ctrl+Z as SIGTSTP (0x1A)
         if (arg.ctrlKey && arg.code === 'KeyZ' && !arg.shiftKey) {
@@ -325,11 +333,9 @@ function init_terminal_for_session(session_id) {
           send_terminal_input('\x04');
           return true;
         }
-        // Allow Ctrl+V for paste (handled by browser)
-        if ((arg.ctrlKey || arg.metaKey) && arg.code === 'KeyV' && arg.shiftKey) {
-          return false; // Let browser handle paste
-        }
       }
+      // Return false for ALL other keys - let xterm handle them
+      // This includes: arrows, backspace, delete, tab, enter, etc.
       return false;
     });
 
