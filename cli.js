@@ -33,7 +33,8 @@ function main() {
     console.error('Usage: shelly <command> --seed <id> [options]');
     console.error('Commands:');
     console.error('  connect --seed <id>');
-    console.error('  exec --seed <id> --command <cmd>');
+    console.error('  send --seed <id> --text "<text>"');
+    console.error('  receive --seed <id>');
     console.error('  status --seed <id>');
     console.error('  disconnect --seed <id>');
     console.error('  serve --seed <id> --port <port>');
@@ -53,8 +54,11 @@ function main() {
       case 'connect':
         commandArgs = {};
         break;
-      case 'exec':
-        commandArgs = { command: args.command };
+      case 'send':
+        commandArgs = { text: args.text };
+        break;
+      case 'receive':
+        commandArgs = {};
         break;
       case 'serve':
         commandArgs = { port: args.port };

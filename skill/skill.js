@@ -1,6 +1,6 @@
 const state = require('../state');
-const { execSync } = require('child_process');
 const server = require('../server');
+const proc = require('../process');
 const { userInfo } = require('os');
 
 class AtomicSkill {
@@ -17,8 +17,11 @@ class AtomicSkill {
         case 'connect':
           result = this.connect(ctx, args);
           break;
-        case 'exec':
-          result = this.exec(ctx, args);
+        case 'send':
+          result = this.send(ctx, args);
+          break;
+        case 'receive':
+          result = this.receive(ctx);
           break;
         case 'status':
           result = this.status(ctx);
@@ -43,10 +46,12 @@ class AtomicSkill {
   }
 
   static connect(ctx, args) {
+    const info = proc.connect(ctx.seed);
     ctx.connected = true;
     ctx.hypersshSeed = ctx.seed;
-    ctx.user = userInfo().username;
+    ctx.user = info.user;
     ctx.connectedAt = Date.now();
+    ctx.procPid = null;
     return {
       status: 'success',
       message: 'Connected',
@@ -55,31 +60,33 @@ class AtomicSkill {
     };
   }
 
-  static exec(ctx, args) {
+  static send(ctx, args) {
     if (!ctx.connected) {
       throw new Error('Not connected. Call connect first');
     }
-    const { command } = args;
-    if (!command) throw new Error('command required');
+    const { text } = args;
+    if (!text) throw new Error('text required');
 
-    try {
-      const output = execSync(`npx hyperssh -s ${ctx.hypersshSeed} -u ${ctx.user} -e "${command}"`, {
-        encoding: 'utf-8',
-        timeout: 30000,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+    proc.send(ctx.seed, text);
+    return {
+      status: 'success',
+      message: 'Sent',
+      seed: ctx.seed,
+      text
+    };
+  }
 
-      return {
-        status: 'success',
-        message: 'Command executed',
-        seed: ctx.seed,
-        command,
-        hypersshSeed: ctx.hypersshSeed,
-        output: output.trim()
-      };
-    } catch (err) {
-      throw new Error(`Command failed: ${err.message}`);
+  static receive(ctx) {
+    if (!ctx.connected) {
+      throw new Error('Not connected. Call connect first');
     }
+    const data = proc.receive(ctx.seed);
+    return {
+      status: 'success',
+      message: 'Received',
+      seed: ctx.seed,
+      data
+    };
   }
 
   static status(ctx) {
@@ -106,6 +113,9 @@ class AtomicSkill {
   }
 
   static disconnect(ctx) {
+    if (ctx.connected) {
+      proc.disconnect(ctx.seed);
+    }
     ctx.connected = false;
     ctx.hypersshSeed = null;
     ctx.user = null;
