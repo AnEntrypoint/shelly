@@ -33,8 +33,9 @@ class StatePersistence {
   }
 
   save(seed, state) {
-    const filePath = this.getPath(seed);
     try {
+      this.ensureDir();
+      const filePath = this.getPath(seed);
       fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
       return true;
     } catch (err) {
