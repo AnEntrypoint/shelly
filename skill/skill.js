@@ -1,5 +1,6 @@
 const state = require('../state');
 const { execSync } = require('child_process');
+const server = require('../server');
 
 class AtomicSkill {
   static execute(seed, command, args = {}) {
@@ -23,6 +24,12 @@ class AtomicSkill {
           break;
         case 'disconnect':
           result = this.disconnect(ctx);
+          break;
+        case 'serve':
+          result = this.serve(ctx, args);
+          break;
+        case 'stop':
+          result = this.stopServing(ctx);
           break;
         default:
           throw new Error(`Unknown command: ${command}`);
@@ -80,16 +87,26 @@ class AtomicSkill {
   }
 
   static status(ctx) {
-    return {
+    const result = {
       status: 'success',
       seed: ctx.seed,
-      connected: ctx.connected,
-      hypersshSeed: ctx.hypersshSeed,
-      user: ctx.user,
       createdAt: new Date(ctx.createdAt).toISOString(),
-      connectedAt: ctx.connectedAt ? new Date(ctx.connectedAt).toISOString() : null,
       lastCmd: ctx.lastCmd
     };
+
+    if (ctx.serving) {
+      result.serving = true;
+      result.serverPort = ctx.serverPort;
+      result.serverPid = ctx.serverPid;
+      result.user = ctx.user;
+    } else {
+      result.connected = ctx.connected;
+      result.hypersshSeed = ctx.hypersshSeed;
+      result.user = ctx.user;
+      result.connectedAt = ctx.connectedAt ? new Date(ctx.connectedAt).toISOString() : null;
+    }
+
+    return result;
   }
 
   static disconnect(ctx) {
@@ -99,6 +116,45 @@ class AtomicSkill {
     return {
       status: 'success',
       message: 'Disconnected',
+      seed: ctx.seed
+    };
+  }
+
+  static serve(ctx, args) {
+    const { port, user } = args;
+    if (!port || !user) throw new Error('port and user required');
+    if (ctx.serving && ctx.serverPid) throw new Error('Already serving on this seed');
+
+    const info = server.start(ctx.seed, port, user);
+    ctx.serving = true;
+    ctx.serverPort = port;
+    ctx.serverPid = info.pid;
+    ctx.user = user;
+    server.restore(ctx.seed, info.pid, port, user);
+
+    return {
+      status: 'success',
+      message: 'Server started',
+      seed: ctx.seed,
+      port,
+      user,
+      pid: info.pid
+    };
+  }
+
+  static stopServing(ctx) {
+    if (!ctx.serving || !ctx.serverPid) {
+      throw new Error('No server running');
+    }
+
+    server.stop(ctx.serverPid);
+    ctx.serving = false;
+    ctx.serverPort = null;
+    ctx.serverPid = null;
+
+    return {
+      status: 'success',
+      message: 'Server stopped',
       seed: ctx.seed
     };
   }

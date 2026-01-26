@@ -24,7 +24,8 @@
   "author": "telessh",
   "license": "ISC",
   "dependencies": {
-    "hyperssh": "^5.0.4"
+    "hyperssh": "^5.0.4",
+    "hypertele": "^1.1.4"
   },
   "engines": {
     "node": ">=14.0.0"

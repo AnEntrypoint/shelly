@@ -17,3 +17,12 @@ All errors return `{status: 'error', error: 'message', seed, command}` with exit
 
 ## State File Isolation
 No cross-seed state sharing. Disconnect preserves state file. Can reconnect to same host with same seed. Requires explicit connect before exec. Missing hypersshSeed or user validates before attempting connection.
+
+## Process Spawning (serve command)
+serve spawns detached hypertele process via `spawn('npx', ['hypertele', ...], {stdio: 'ignore', detached: true})`. Process unref'd immediately. PID stored in state file for recovery. Process lifecycle NOT managed by parent - survives process exit. Stop command kills process group with SIGTERM via `process.kill(-pid)`.
+
+## Hypertele Unix Socket
+hypertele creates unix socket at `/tmp/hypertele-{seed}.sock` for each server. Socket cleaned up on stop. Multiple seeds can serve simultaneously - each has isolated socket and process.
+
+## Port Allocation
+serve --port must be available locally on 127.0.0.1. No validation before spawn - hypertele will fail if port in use. Server state persists in file even if spawn fails - must manually fix port conflict and retry.

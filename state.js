@@ -14,6 +14,9 @@ class SeedState {
           connected: false,
           hypersshSeed: null,
           user: null,
+          serving: false,
+          serverPort: null,
+          serverPid: null,
           createdAt: Date.now(),
           lastCmd: null
         };

@@ -36,6 +36,8 @@ function main() {
     console.error('  exec --seed <id> --command <cmd>');
     console.error('  status --seed <id>');
     console.error('  disconnect --seed <id>');
+    console.error('  serve --seed <id> --port <port> --user <user>');
+    console.error('  stop --seed <id>');
     process.exit(1);
   }
 
@@ -56,6 +58,12 @@ function main() {
         break;
       case 'exec':
         commandArgs = { command: args.command };
+        break;
+      case 'serve':
+        commandArgs = {
+          port: args.port,
+          user: args.user
+        };
         break;
     }
 
