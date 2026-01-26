@@ -29,3 +29,6 @@ hypertele creates unix socket at `/tmp/hypertele-{seed}.sock` for each server. S
 
 ## Port Allocation
 serve --port must be available locally on 127.0.0.1. No validation before spawn - hypertele will fail if port in use. Server state persists in file even if spawn fails - must manually fix port conflict and retry.
+
+## Persistent Connections (send/receive)
+connect --seed <id> creates persistent connection state in ~/.telessh/conns/{seed}.json. send executes command via hyperssh and buffers output. receive reads and clears the buffer. Each send spawns new hyperssh process (not truly persistent SSH session) but maintains connection metadata and output history across CLI invocations. Buffer cleared after receive - multiple receives return empty until new send.
