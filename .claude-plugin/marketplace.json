@@ -1,26 +1,26 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "telessh",
-  "description": "Seeded HyperSSH connection manager with plugin architecture and marketplace",
+  "name": "shelly",
+  "description": "Seeded HyperSSH connection manager - atomic commands via CLI, persistent state via seed",
   "version": "2.0.0",
   "owner": {
-    "name": "Telessh",
-    "email": "support@telessh.dev"
+    "name": "Shelly",
+    "email": "support@shelly.dev"
   },
   "metadata": {
-    "description": "Complete skill system for managing seeded HyperSSH connections with dynamic plugin loading, registry, and marketplace support",
+    "description": "Atomic command execution on HyperSSH connections with seed-based state persistence",
     "version": "2.0.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
     {
-      "name": "telessh",
-      "description": "Seeded HyperSSH connection skill with 100% predictable structure, plugin architecture, and marketplace support",
+      "name": "shelly",
+      "description": "Atomic command execution on seeded HyperSSH connections - each CLI invocation executes one command with persistent state",
       "source": "./",
       "version": "2.0.0",
       "author": {
-        "name": "Telessh",
-        "email": "support@telessh.dev"
+        "name": "Shelly",
+        "email": "support@shelly.dev"
       },
       "homepage": "https://github.com/AnEntrypoint/shelly",
       "repository": "https://github.com/AnEntrypoint/shelly",
@@ -29,20 +29,20 @@
         "ssh",
         "hyperssh",
         "seeded",
-        "connection",
-        "plugin",
-        "skill",
-        "marketplace"
+        "atomic",
+        "command",
+        "remote",
+        "execution"
       ],
       "category": "development",
       "tags": [
         "networking",
         "remote-access",
-        "plugin-system"
+        "automation"
       ],
       "strict": false,
       "skills": [
-        "./skill"
+        "./skills/shelly"
       ]
     }
   ]

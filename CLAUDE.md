@@ -1,47 +1,33 @@
 # Technical Caveats
 
-## Seed-Based Determinism
-- Seed parameter MUST be consistent across skill instances for deterministic behavior
-- Seed mismatch on state import throws error; state is NOT portable across seeds
-- Multiple skill instances with different seeds create isolated execution contexts
+## Atomic Command Model
+- Each CLI invocation executes exactly one command and exits
+- No persistent shell or REPL
+- State managed entirely via seed-based persistence, not session IDs
+- execute() returns result synchronously; no async waiting
 
-## Plugin System
-- PluginManager initialization is async; must await init() before using plugins
-- global.telesshPluginManager singleton persists across reloads
-- Plugin hooks execute sequentially; async handlers block subsequent hooks
-- Plugin unload() must explicitly clean up listeners; orphaned listeners break reload
+## Seed-Based State Persistence
+- Seed uniquely identifies connection context across CLI invocations
+- Same seed parameter restores previous state from ~/.shelly/seeds/{seed-hash}.json
+- State loaded on access via state.get(seed), auto-saved after each command
+- Seed mismatch on import throws error; state NOT portable across different seeds
+- Each seed is completely isolated; no cross-seed state sharing
 
-## Registry and Marketplace
-- Registry seed must match on import/export; seed mismatch throws error
-- Plugin installation marks as installed; does not auto-load plugin
-- Ratings and featured plugins are in-memory; persistence requires explicit export
+## State File Format
+- State files stored at: ~/.shelly/seeds/{SHA256(seed)}.json
+- Location determined by crypto.createHash('sha256').update(seed).digest('hex')
+- Directory created automatically on first use
+- Files are portable JSON; can be manually exported/imported
+- File permissions inherited from process umask
 
-## Skill Instance Management
-- skillInstance persists across calls with same seed; create new TelesshSkill() to reset
-- execute() function caches skill by seed; different seeds get separate instances
-- Global state lives in global.telesshPluginManager; survives module reloads
+## Connection Lifecycle
+- connect() command establishes state but does NOT keep process alive
+- exec() requires connected state; fails if not connected first
+- disconnect() clears connection but preserves state file
+- State persists even after disconnect; can reconnect with same seed later
 
-## State Management
-- Sessions are NOT exported by default; only metadata exported
-- State export preserves seed; import fails if seed doesn't match
-- Plugin loaded status preserved; plugin paths must be stable across reloads
-
-## Performance Considerations
-- Registry search is linear O(n); large registries (>1000 plugins) may be slow
-- Checksum computation uses SHA256; significant for large state objects
-- Buffer concatenation is O(n); retrieving large buffers rebuilds strings repeatedly
-- State export serializes entire registry; large registries produce large exports
-
-## Determinism Scope
-- Seed guarantees deterministic STRUCTURE and BEHAVIOR of skill operations
-- Seed does NOT guarantee deterministic RESULTS from remote HyperSSH connections
-- Same seed = same validation rules, error messages, command outputs
-- External systems (SSH servers) are non-deterministic regardless of seed
-
-## Plugin Marketplace (.claude-plugin/marketplace.json)
-- Schema URL: https://anthropic.com/claude-code/marketplace.schema.json
-- Plugin source can be relative path ("./") or GitHub/Git URL with ref and sha
-- Relative skill paths are resolved against plugin's installation directory
-- Reserved marketplace names: claude-code-marketplace, claude-plugins-official, etc.
-- ${CLAUDE_PLUGIN_ROOT} variable available in hooks/MCP configs for plugin root references
-- strict: false allows plugin to work without separate plugin.json file
+## Error Handling
+- All errors return {status: 'error', error: 'message'} with exit code 1
+- No exceptions escape; caught at command boundary
+- Missing required args throw validation errors with clear messages
+- HyperSSH connection failures captured as error strings in result

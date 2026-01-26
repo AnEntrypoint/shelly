@@ -1,90 +1,66 @@
-const EventEmitter = require('events');
+const persist = require('./persist');
 
-class State {
+class SeedState {
   constructor() {
-    this.sessions = new Map();
-    this.logs = [];
-    this.events = new EventEmitter();
-    this.config = {
-      maxLogSize: 10000,
-      logRetention: 1000,
-      sessionTimeout: 0,
-      autoPersist: true
-    };
+    this.seeds = new Map();
   }
 
-  createSession(id, seed, user) {
-    const session = {
-      id,
-      seed,
-      user,
-      connection: null,
-      state: 'disconnected',
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      buffer: [],
-      errors: []
-    };
-    this.sessions.set(id, session);
-    this.events.emit('session:created', session);
-    return session;
-  }
-
-  getSession(id) {
-    return this.sessions.get(id);
-  }
-
-  deleteSession(id) {
-    const session = this.sessions.get(id);
-    if (session) {
-      this.sessions.delete(id);
-      this.events.emit('session:deleted', session);
+  get(seed) {
+    if (!this.seeds.has(seed)) {
+      let state = persist.load(seed);
+      if (!state) {
+        state = {
+          seed,
+          connected: false,
+          hypersshSeed: null,
+          user: null,
+          createdAt: Date.now(),
+          lastCmd: null
+        };
+      }
+      this.seeds.set(seed, state);
     }
-    return session;
+    return this.seeds.get(seed);
   }
 
-  log(msg, level = 'info') {
-    const entry = {
-      ts: Date.now(),
-      level,
-      msg,
-      session: null
-    };
-    this.logs.push(entry);
-    if (this.logs.length > this.config.maxLogSize) {
-      this.logs.shift();
+  save(seed) {
+    const state = this.seeds.get(seed);
+    if (state) {
+      persist.save(seed, state);
     }
-    this.events.emit('log', entry);
-    return entry;
   }
 
-  getLogs(filter = {}) {
-    let result = this.logs;
-    if (filter.level) {
-      result = result.filter(e => e.level === filter.level);
-    }
-    if (filter.since) {
-      result = result.filter(e => e.ts >= filter.since);
-    }
-    return result;
+  delete(seed) {
+    this.seeds.delete(seed);
+    persist.delete(seed);
   }
 
-  clearLogs() {
-    const count = this.logs.length;
-    this.logs = [];
-    this.events.emit('logs:cleared', { count });
-    return count;
+  list() {
+    return Array.from(this.seeds.values());
+  }
+
+  export(seed) {
+    const state = this.get(seed);
+    return JSON.stringify(state);
+  }
+
+  import(seed, data) {
+    const parsed = JSON.parse(data);
+    if (parsed.seed !== seed) {
+      throw new Error(`Seed mismatch: ${parsed.seed} !== ${seed}`);
+    }
+    this.seeds.set(seed, parsed);
+    this.save(seed);
+    return this.seeds.get(seed);
   }
 
   reset() {
-    this.sessions.clear();
-    this.logs = [];
-    this.events.emit('state:reset');
+    this.seeds.clear();
   }
 }
 
 if (!global.telesshState) {
-  global.telesshState = new State();
+  global.telesshState = new SeedState();
 }
 
 module.exports = global.telesshState;

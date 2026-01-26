@@ -1,104 +1,20 @@
-const TelesshSkill = require('./skill');
+const AtomicSkill = require('./skill');
 
-let skillInstance = null;
-
-async function execute(args = {}) {
-  const { seed = 'default', command, params = {} } = args;
+function execute(args = {}) {
+  const { seed, command, args: cmdArgs = {} } = args;
 
   if (!seed) {
-    throw new Error('Seed parameter required for telessh skill');
-  }
-
-  if (!skillInstance || skillInstance.seed !== seed) {
-    skillInstance = new TelesshSkill(seed);
-    await skillInstance.init();
+    return { status: 'error', error: 'seed required' };
   }
 
   if (!command) {
-    return {
-      status: 'ready',
-      seed: seed,
-      instance: skillInstance,
-      commands: [
-        'connect', 'send', 'disconnect', 'getBuffer', 'clearBuffer',
-        'listSessions', 'listPlugins', 'loadPlugin', 'unloadPlugin',
-        'getRegistry', 'getMarketplace', 'getValidator', 'getState',
-        'executeHook', 'exportState', 'importState'
-      ]
-    };
+    return { status: 'error', error: 'command required' };
   }
 
-  try {
-    switch (command) {
-      case 'connect':
-        return await skillInstance.connect(params.seed, params.user, params.opts);
-
-      case 'send':
-        return await skillInstance.send(params.sessionId, params.data);
-
-      case 'disconnect':
-        return await skillInstance.disconnect(params.sessionId);
-
-      case 'getBuffer':
-        return skillInstance.getBuffer(params.sessionId);
-
-      case 'clearBuffer':
-        return skillInstance.clearBuffer(params.sessionId);
-
-      case 'listSessions':
-        return skillInstance.listSessions();
-
-      case 'listPlugins':
-        return skillInstance.listPlugins();
-
-      case 'loadPlugin':
-        return await skillInstance.loadPlugin(params.name, params.modulePath);
-
-      case 'unloadPlugin':
-        return skillInstance.unloadPlugin(params.name);
-
-      case 'getRegistry':
-        return skillInstance.getRegistry();
-
-      case 'getMarketplace':
-        return skillInstance.getMarketplace();
-
-      case 'getValidator':
-        return skillInstance.getValidator();
-
-      case 'getState':
-        return skillInstance.getState();
-
-      case 'executeHook':
-        return await skillInstance.executeHook(params.hookName, params.data);
-
-      case 'exportState':
-        return skillInstance.exportState();
-
-      case 'importState':
-        return await skillInstance.importState(params.data);
-
-      default:
-        throw new Error(`Unknown command: ${command}`);
-    }
-  } catch (err) {
-    return {
-      status: 'error',
-      error: err.message,
-      command: command,
-      seed: seed
-    };
-  }
+  return AtomicSkill.execute(seed, command, cmdArgs);
 }
 
 module.exports = {
   execute,
-  TelesshSkill,
-  getInstance: () => skillInstance,
-  getSkillForSeed: (seed) => {
-    if (!skillInstance || skillInstance.seed !== seed) {
-      return null;
-    }
-    return skillInstance;
-  }
+  AtomicSkill
 };
