@@ -1,10 +1,11 @@
 const state = require('../state');
 const server = require('../server');
 const proc = require('../process');
+const ipc = require('../ipc');
 const { userInfo } = require('os');
 
 class AtomicSkill {
-  static execute(seed, command, args = {}) {
+  static async execute(seed, command, args = {}) {
     if (!seed) throw new Error('seed required');
     if (!command) throw new Error('command required');
 
@@ -15,10 +16,10 @@ class AtomicSkill {
       let result;
       switch (command) {
         case 'connect':
-          result = this.connect(ctx, args);
+          result = await this.connect(ctx, args);
           break;
         case 'send':
-          result = this.send(ctx, args);
+          result = await this.send(ctx, args);
           break;
         case 'receive':
           result = this.receive(ctx);
@@ -27,7 +28,7 @@ class AtomicSkill {
           result = this.status(ctx);
           break;
         case 'disconnect':
-          result = this.disconnect(ctx);
+          result = await this.disconnect(ctx);
           break;
         case 'serve':
           result = this.serve(ctx, args);
@@ -45,13 +46,14 @@ class AtomicSkill {
     }
   }
 
-  static connect(ctx, args) {
-    const info = proc.connect(ctx.seed);
+  static async connect(ctx, args) {
+    const info = ipc.startDaemon(ctx.seed);
+    await info;
     ctx.connected = true;
     ctx.hypersshSeed = ctx.seed;
-    ctx.user = info.user;
+    ctx.user = userInfo().username;
     ctx.connectedAt = Date.now();
-    ctx.procPid = null;
+    ctx.daemonPid = info.pid;
     return {
       status: 'success',
       message: 'Connected',
@@ -60,21 +62,20 @@ class AtomicSkill {
     };
   }
 
-  static send(ctx, args) {
+  static async send(ctx, args) {
     if (!ctx.connected) {
       throw new Error('Not connected. Call connect first');
     }
     const { text } = args;
     if (!text) throw new Error('text required');
 
-    proc.send(ctx.seed, text);
-    const data = proc.receive(ctx.seed);
+    const result = await ipc.sendToDaemon(ctx.seed, { type: 'send', text });
     return {
       status: 'success',
       message: 'Sent and received',
       seed: ctx.seed,
       command: text,
-      output: data
+      output: result.output || ''
     };
   }
 
@@ -114,13 +115,14 @@ class AtomicSkill {
     return result;
   }
 
-  static disconnect(ctx) {
+  static async disconnect(ctx) {
     if (ctx.connected) {
-      proc.disconnect(ctx.seed);
+      await ipc.stopDaemon(ctx.seed);
     }
     ctx.connected = false;
     ctx.hypersshSeed = null;
     ctx.user = null;
+    ctx.daemonPid = null;
     return {
       status: 'success',
       message: 'Disconnected',

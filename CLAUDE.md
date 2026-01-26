@@ -1,7 +1,7 @@
 # Technical Caveats
 
-## Atomic Command Model (Critical Design)
-Each CLI invocation executes one command and exits. State persists via files, not sessions. No REPL. No persistent process. Each call is independent and atomic.
+## Daemon-Based Persistent Connections
+CLI remains atomic but background daemon maintains persistent SSH connections. `connect --seed X` spawns daemon listening on ~/.telessh/daemon-{seed}.sock. Subsequent `send`/`receive`/`status` communicate with daemon via Unix socket IPC. Daemon handles connection lifecycle, CLI returns immediately. `disconnect` terminates daemon and cleans socket.
 
 ## Seed-Based State Files
 State persists in `~/.telessh/seeds/{SHA256(seed)}.json`. Seed uniquely identifies connection context. Same seed in new process auto-restores previous state. Each seed completely isolated from others.
@@ -30,8 +30,8 @@ hypertele creates unix socket at `/tmp/hypertele-{seed}.sock` for each server. S
 ## Port Allocation
 serve --port is optional. If not provided, auto-selects random port 9000-9999. Port must be available locally on 127.0.0.1. No validation before spawn - hypertele will fail if port in use. Server state persists in file even if spawn fails - must manually fix port conflict and retry. Response includes `connectWith` field showing the CLI command to connect to the server.
 
-## Persistent Connections (send/receive)
-connect --seed <id> creates persistent connection state in ~/.telessh/conns/{seed}.json. send executes command via hyperssh and AUTOMATICALLY receives output in same operation. Each send spawns new hyperssh process (not truly persistent SSH session) but maintains connection metadata and output history across CLI invocations. Response includes `command` (sent text) and `output` (execution result). Separate receive() still available - returns empty if output already consumed by auto-receive.
+## IPC Communication Protocol
+Daemon listens on Unix socket for JSON messages. CLI connects, sends command, waits for response, disconnects. Messages: `{"type": "send", "text": "..."}` and `{"type": "disconnect"}`. Daemon queues commands, executes via execSync, returns output. Timeout 5s per request, daemon timeout 30s for hyperssh execution. Socket cleanup on daemon shutdown.
 
 ## Session-Like Seed Interface
 After `connect --seed <id>`, the seed is stored in ~/.telessh/current-seed. Subsequent commands (send, receive, status, disconnect) do NOT require --seed - they read from current-seed file. Only connect and serve require explicit --seed on CLI. Disconnect clears the current-seed file. Providing explicit --seed on send/receive/status overrides current-seed for that command but does NOT update the file. This enables session-like workflow without a persistent REPL: `connect --seed X` → `send --text "cmd"` → `receive` → `disconnect`.

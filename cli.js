@@ -41,7 +41,7 @@ function clearCurrentSeed() {
   if (fs.existsSync(seedFile)) fs.unlinkSync(seedFile);
 }
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
 
@@ -105,7 +105,7 @@ function main() {
         break;
     }
 
-    const result = AtomicSkill.execute(seed, cmd, commandArgs);
+    const result = await AtomicSkill.execute(seed, cmd, commandArgs);
 
     // After successful connect or serve, set current seed
     if ((cmd === 'connect' || cmd === 'serve') && result.status === 'success') {
