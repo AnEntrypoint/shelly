@@ -7,8 +7,14 @@ function getSocketPath(seed) {
 }
 
 function sendToDaemon(seed, msg) {
+  const socketPath = getSocketPath(seed);
+
+  if (!fs.existsSync(socketPath)) {
+    return Promise.reject(new Error(`Daemon not running. Run 'connect --seed ${seed}' first`));
+  }
+
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(getSocketPath(seed));
+    const socket = net.createConnection(socketPath);
     let response = '';
 
     socket.on('connect', () => {

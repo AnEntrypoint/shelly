@@ -35,3 +35,6 @@ Daemon listens on Unix socket for JSON messages. CLI connects, sends command, wa
 
 ## Session-Like Seed Interface
 After `connect --seed <id>`, the seed is stored in ~/.shelly/current-seed. Subsequent commands (send, receive, status, disconnect) do NOT require --seed - they read from current-seed file. Only connect and serve require explicit --seed on CLI. Disconnect clears the current-seed file. Providing explicit --seed on send/receive/status overrides current-seed for that command but does NOT update the file. This enables session-like workflow without a persistent REPL: `connect --seed X` → `send --text "cmd"` → `receive` → `disconnect`.
+
+## Daemon Reboot Behavior
+Daemon processes don't survive system reboot but ~/.shelly/current-seed file persists. After reboot, current-seed file may reference a dead daemon. Commands will fail with "Not connected" error. Solution: run `disconnect` to clear stale current-seed, then `connect --seed <id>` to spawn new daemon. Or use explicit `--seed` to bypass current-seed file entirely.
