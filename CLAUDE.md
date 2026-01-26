@@ -16,7 +16,10 @@ HyperSSH/hyperdht requires exactly 32-byte seeds (base32 encoded). Invalid seeds
 All errors return `{status: 'error', error: 'message', seed, command}` with exit code 1. Clients must check status field, not exit code alone. stdout contains all output (success and errors).
 
 ## State File Isolation
-No cross-seed state sharing. Disconnect preserves state file. Can reconnect to same host with same seed. Requires explicit connect before exec. Missing hypersshSeed or user validates before attempting connection.
+No cross-seed state sharing. Disconnect preserves state file. Can reconnect to same host with same seed. Requires explicit connect before exec.
+
+## Minimal Seed Interface
+Seed IS the connection identifier and HyperSSH key. No separate parameters. User auto-derived from `os.userInfo().username`. Commands: `serve --seed <id> --port <port>` and `connect --seed <id>`. No --user or --hypersshSeed parameters needed.
 
 ## Process Spawning (serve command)
 serve spawns detached hypertele process via `spawn('npx', ['hypertele', ...], {stdio: 'ignore', detached: true})`. Process unref'd immediately. PID stored in state file for recovery. Process lifecycle NOT managed by parent - survives process exit. Stop command kills process group with SIGTERM via `process.kill(-pid)`.
