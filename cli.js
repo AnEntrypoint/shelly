@@ -32,11 +32,11 @@ function main() {
     console.error('Error: --seed required');
     console.error('Usage: shelly <command> --seed <id> [options]');
     console.error('Commands:');
-    console.error('  connect --seed <id> --hypersshSeed <host> --user <user>');
+    console.error('  connect --seed <id>');
     console.error('  exec --seed <id> --command <cmd>');
     console.error('  status --seed <id>');
     console.error('  disconnect --seed <id>');
-    console.error('  serve --seed <id> --port <port> --user <user>');
+    console.error('  serve --seed <id> --port <port>');
     console.error('  stop --seed <id>');
     process.exit(1);
   }
@@ -51,19 +51,13 @@ function main() {
 
     switch (cmd) {
       case 'connect':
-        commandArgs = {
-          hypersshSeed: args.hypersshSeed,
-          user: args.user
-        };
+        commandArgs = {};
         break;
       case 'exec':
         commandArgs = { command: args.command };
         break;
       case 'serve':
-        commandArgs = {
-          port: args.port,
-          user: args.user
-        };
+        commandArgs = { port: args.port };
         break;
     }
 

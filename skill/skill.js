@@ -1,6 +1,7 @@
 const state = require('../state');
 const { execSync } = require('child_process');
 const server = require('../server');
+const { userInfo } = require('os');
 
 class AtomicSkill {
   static execute(seed, command, args = {}) {
@@ -42,20 +43,15 @@ class AtomicSkill {
   }
 
   static connect(ctx, args) {
-    const { hypersshSeed, user } = args;
-    if (!hypersshSeed || !user) {
-      throw new Error('hypersshSeed and user required');
-    }
     ctx.connected = true;
-    ctx.hypersshSeed = hypersshSeed;
-    ctx.user = user;
+    ctx.hypersshSeed = ctx.seed;
+    ctx.user = userInfo().username;
     ctx.connectedAt = Date.now();
     return {
       status: 'success',
       message: 'Connected',
       seed: ctx.seed,
-      hypersshSeed,
-      user
+      user: ctx.user
     };
   }
 
@@ -121,10 +117,11 @@ class AtomicSkill {
   }
 
   static serve(ctx, args) {
-    const { port, user } = args;
-    if (!port || !user) throw new Error('port and user required');
+    const { port } = args;
+    if (!port) throw new Error('port required');
     if (ctx.serving && ctx.serverPid) throw new Error('Already serving on this seed');
 
+    const user = userInfo().username;
     const info = server.start(ctx.seed, port, user);
     ctx.serving = true;
     ctx.serverPort = port;
