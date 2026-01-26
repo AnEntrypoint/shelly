@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const AtomicSkill = require('./skill/skill');
+const path = require('path');
+const fs = require('fs');
 
 function parseArgs(argv) {
   const args = {};
@@ -21,29 +23,58 @@ function parseArgs(argv) {
   return args;
 }
 
+function getCurrentSeed() {
+  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  if (!fs.existsSync(seedFile)) return null;
+  return fs.readFileSync(seedFile, 'utf-8').trim();
+}
+
+function setCurrentSeed(seed) {
+  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  const dir = path.dirname(seedFile);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(seedFile, seed);
+}
+
+function clearCurrentSeed() {
+  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  if (fs.existsSync(seedFile)) fs.unlinkSync(seedFile);
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
 
-  const seed = args.seed;
+  let seed = args.seed;
   const cmd = args._cmd;
-
-  if (!seed) {
-    console.error('Error: --seed required');
-    console.error('Usage: shelly <command> --seed <id> [options]');
-    console.error('Commands:');
-    console.error('  connect --seed <id>');
-    console.error('  send --seed <id> --text "<text>"');
-    console.error('  receive --seed <id>');
-    console.error('  status --seed <id>');
-    console.error('  disconnect --seed <id>');
-    console.error('  serve --seed <id> --port <port>');
-    console.error('  stop --seed <id>');
-    process.exit(1);
-  }
 
   if (!cmd) {
     console.error('Error: command required');
+    console.error('Usage: shelly <command> [--seed <id>] [options]');
+    console.error('Commands:');
+    console.error('  connect --seed <id>');
+    console.error('  send --text "<text>"');
+    console.error('  receive');
+    console.error('  status');
+    console.error('  disconnect');
+    console.error('  serve --seed <id> [--port <port>]');
+    console.error('  stop');
+    process.exit(1);
+  }
+
+  // For connect and serve, seed is required from CLI
+  if ((cmd === 'connect' || cmd === 'serve') && !seed) {
+    console.error('Error: --seed required for ' + cmd + ' command');
+    process.exit(1);
+  }
+
+  // For other commands, use provided seed or read from current-seed file
+  if (!seed && cmd !== 'connect' && cmd !== 'serve') {
+    seed = getCurrentSeed();
+  }
+
+  if (!seed) {
+    console.error('Error: --seed required (or run "connect --seed <id>" first)');
     process.exit(1);
   }
 
@@ -61,11 +92,22 @@ function main() {
         commandArgs = {};
         break;
       case 'serve':
-        commandArgs = { port: args.port };
+        commandArgs = { port: args.port || null };
         break;
     }
 
     const result = AtomicSkill.execute(seed, cmd, commandArgs);
+
+    // After successful connect, set current seed
+    if (cmd === 'connect' && result.status === 'success') {
+      setCurrentSeed(seed);
+    }
+
+    // After successful disconnect, clear current seed
+    if (cmd === 'disconnect' && result.status === 'success') {
+      clearCurrentSeed();
+    }
+
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === 'error' ? 1 : 0);
   } catch (err) {

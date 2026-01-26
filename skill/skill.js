@@ -127,9 +127,12 @@ class AtomicSkill {
   }
 
   static serve(ctx, args) {
-    const { port } = args;
-    if (!port) throw new Error('port required');
+    let { port } = args;
     if (ctx.serving && ctx.serverPid) throw new Error('Already serving on this seed');
+
+    if (!port) {
+      port = 9000 + Math.floor(Math.random() * 1000);
+    }
 
     const user = userInfo().username;
     const info = server.start(ctx.seed, port, user);
@@ -145,7 +148,8 @@ class AtomicSkill {
       seed: ctx.seed,
       port,
       user,
-      pid: info.pid
+      pid: info.pid,
+      connectWith: `shelly connect --seed ${ctx.seed}`
     };
   }
 
