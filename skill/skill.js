@@ -1,4 +1,5 @@
 const state = require('../state');
+const { execSync } = require('child_process');
 
 class AtomicSkill {
   static execute(seed, command, args = {}) {
@@ -17,17 +18,8 @@ class AtomicSkill {
         case 'exec':
           result = this.exec(ctx, args);
           break;
-        case 'send':
-          result = this.send(ctx, args);
-          break;
         case 'status':
           result = this.status(ctx);
-          break;
-        case 'export':
-          result = this.exportState(ctx);
-          break;
-        case 'import':
-          result = this.importState(ctx, args);
           break;
         case 'disconnect':
           result = this.disconnect(ctx);
@@ -67,26 +59,24 @@ class AtomicSkill {
     const { command } = args;
     if (!command) throw new Error('command required');
 
-    return {
-      status: 'success',
-      message: 'Command executed',
-      seed: ctx.seed,
-      command,
-      hypersshSeed: ctx.hypersshSeed,
-      output: `Executed on ${ctx.hypersshSeed}: ${command}`
-    };
-  }
+    try {
+      const output = execSync(`npx hyperssh -s ${ctx.hypersshSeed} -u ${ctx.user} -e "${command}"`, {
+        encoding: 'utf-8',
+        timeout: 30000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
 
-  static send(ctx, args) {
-    if (!ctx.connected) throw new Error('Not connected');
-    const { data } = args;
-    if (!data) throw new Error('data required');
-    return {
-      status: 'success',
-      message: 'Data sent',
-      seed: ctx.seed,
-      bytes: data.length
-    };
+      return {
+        status: 'success',
+        message: 'Command executed',
+        seed: ctx.seed,
+        command,
+        hypersshSeed: ctx.hypersshSeed,
+        output: output.trim()
+      };
+    } catch (err) {
+      throw new Error(`Command failed: ${err.message}`);
+    }
   }
 
   static status(ctx) {
@@ -99,29 +89,6 @@ class AtomicSkill {
       createdAt: new Date(ctx.createdAt).toISOString(),
       connectedAt: ctx.connectedAt ? new Date(ctx.connectedAt).toISOString() : null,
       lastCmd: ctx.lastCmd
-    };
-  }
-
-  static exportState(ctx) {
-    return {
-      status: 'success',
-      seed: ctx.seed,
-      data: JSON.stringify(ctx)
-    };
-  }
-
-  static importState(ctx, args) {
-    const { data } = args;
-    if (!data) throw new Error('data required');
-    const imported = JSON.parse(data);
-    if (imported.seed !== ctx.seed) {
-      throw new Error(`Seed mismatch on import: ${imported.seed} !== ${ctx.seed}`);
-    }
-    Object.assign(ctx, imported);
-    return {
-      status: 'success',
-      message: 'State imported',
-      seed: ctx.seed
     };
   }
 

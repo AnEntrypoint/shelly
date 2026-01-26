@@ -81,21 +81,6 @@ Close connection (state file preserved).
 shelly disconnect --seed <id>
 ```
 
-### export
-
-Export state as JSON.
-
-```bash
-shelly export --seed <id>
-```
-
-### import
-
-Import previously exported state.
-
-```bash
-shelly import --seed <id> --data <json>
-```
 
 ## State Persistence
 

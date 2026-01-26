@@ -36,8 +36,6 @@ function main() {
     console.error('  exec --seed <id> --command <cmd>');
     console.error('  status --seed <id>');
     console.error('  disconnect --seed <id>');
-    console.error('  export --seed <id>');
-    console.error('  import --seed <id> --data <json>');
     process.exit(1);
   }
 
@@ -58,12 +56,6 @@ function main() {
         break;
       case 'exec':
         commandArgs = { command: args.command };
-        break;
-      case 'send':
-        commandArgs = { data: args.data };
-        break;
-      case 'import':
-        commandArgs = { data: args.data };
         break;
     }
 
