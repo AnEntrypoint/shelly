@@ -91,20 +91,29 @@ function main() {
       case 'receive':
         commandArgs = {};
         break;
+      case 'status':
+        commandArgs = {};
+        break;
+      case 'disconnect':
+        commandArgs = {};
+        break;
       case 'serve':
         commandArgs = { port: args.port || null };
+        break;
+      case 'stop':
+        commandArgs = {};
         break;
     }
 
     const result = AtomicSkill.execute(seed, cmd, commandArgs);
 
-    // After successful connect, set current seed
-    if (cmd === 'connect' && result.status === 'success') {
+    // After successful connect or serve, set current seed
+    if ((cmd === 'connect' || cmd === 'serve') && result.status === 'success') {
       setCurrentSeed(seed);
     }
 
-    // After successful disconnect, clear current seed
-    if (cmd === 'disconnect' && result.status === 'success') {
+    // After successful disconnect or stop, clear current seed
+    if ((cmd === 'disconnect' || cmd === 'stop') && result.status === 'success') {
       clearCurrentSeed();
     }
 
