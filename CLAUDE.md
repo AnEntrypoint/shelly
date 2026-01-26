@@ -1,10 +1,10 @@
 # Technical Caveats
 
 ## Daemon-Based Persistent Connections
-CLI remains atomic but background daemon maintains persistent SSH connections. `connect --seed X` spawns daemon listening on ~/.telessh/daemon-{seed}.sock. Subsequent `send`/`receive`/`status` communicate with daemon via Unix socket IPC. Daemon handles connection lifecycle, CLI returns immediately. `disconnect` terminates daemon and cleans socket.
+CLI remains atomic but background daemon maintains persistent SSH connections. `connect --seed X` spawns daemon listening on ~/.shelly/daemon-{seed}.sock. Subsequent `send`/`receive`/`status` communicate with daemon via Unix socket IPC. Daemon handles connection lifecycle, CLI returns immediately. `disconnect` terminates daemon and cleans socket.
 
 ## Seed-Based State Files
-State persists in `~/.telessh/seeds/{SHA256(seed)}.json`. Seed uniquely identifies connection context. Same seed in new process auto-restores previous state. Each seed completely isolated from others.
+State persists in `~/.shelly/seeds/{SHA256(seed)}.json`. Seed uniquely identifies connection context. Same seed in new process auto-restores previous state. Each seed completely isolated from others.
 
 ## execSync with HyperSSH
 exec() uses `execSync('npx hyperssh -s <seed> -u <user> -e "<command>"')` with 30s timeout. Output captured as string. Shells special chars in command with double quotes.
@@ -34,4 +34,4 @@ serve --port is optional. If not provided, auto-selects random port 9000-9999. P
 Daemon listens on Unix socket for JSON messages. CLI connects, sends command, waits for response, disconnects. Messages: `{"type": "send", "text": "..."}` and `{"type": "disconnect"}`. Daemon queues commands, executes via execSync, returns output. Timeout 5s per request, daemon timeout 30s for hyperssh execution. Socket cleanup on daemon shutdown.
 
 ## Session-Like Seed Interface
-After `connect --seed <id>`, the seed is stored in ~/.telessh/current-seed. Subsequent commands (send, receive, status, disconnect) do NOT require --seed - they read from current-seed file. Only connect and serve require explicit --seed on CLI. Disconnect clears the current-seed file. Providing explicit --seed on send/receive/status overrides current-seed for that command but does NOT update the file. This enables session-like workflow without a persistent REPL: `connect --seed X` → `send --text "cmd"` → `receive` → `disconnect`.
+After `connect --seed <id>`, the seed is stored in ~/.shelly/current-seed. Subsequent commands (send, receive, status, disconnect) do NOT require --seed - they read from current-seed file. Only connect and serve require explicit --seed on CLI. Disconnect clears the current-seed file. Providing explicit --seed on send/receive/status overrides current-seed for that command but does NOT update the file. This enables session-like workflow without a persistent REPL: `connect --seed X` → `send --text "cmd"` → `receive` → `disconnect`.

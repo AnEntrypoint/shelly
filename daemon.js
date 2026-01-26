@@ -7,7 +7,7 @@ const { userInfo } = require('os');
 const seed = process.argv[2];
 if (!seed) process.exit(1);
 
-const socketPath = path.join(process.env.HOME, '.telessh', `daemon-${seed}.sock`);
+const socketPath = path.join(process.env.HOME, '.shelly', `daemon-${seed}.sock`);
 const dir = path.dirname(socketPath);
 
 if (!fs.existsSync(dir)) {

@@ -21,7 +21,7 @@
     "claude",
     "marketplace"
   ],
-  "author": "telessh",
+  "author": "shelly",
   "license": "ISC",
   "dependencies": {
     "hyperssh": "^5.0.4",

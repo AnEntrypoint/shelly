@@ -24,20 +24,20 @@ function parseArgs(argv) {
 }
 
 function getCurrentSeed() {
-  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  const seedFile = path.join(process.env.HOME, '.shelly', 'current-seed');
   if (!fs.existsSync(seedFile)) return null;
   return fs.readFileSync(seedFile, 'utf-8').trim();
 }
 
 function setCurrentSeed(seed) {
-  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  const seedFile = path.join(process.env.HOME, '.shelly', 'current-seed');
   const dir = path.dirname(seedFile);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(seedFile, seed);
 }
 
 function clearCurrentSeed() {
-  const seedFile = path.join(process.env.HOME, '.telessh', 'current-seed');
+  const seedFile = path.join(process.env.HOME, '.shelly', 'current-seed');
   if (fs.existsSync(seedFile)) fs.unlinkSync(seedFile);
 }
 

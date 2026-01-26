@@ -4,7 +4,7 @@ const path = require('path');
 const { userInfo } = require('os');
 
 function getConnPaths(seed) {
-  const dir = path.join(process.env.HOME, '.telessh', 'conns');
+  const dir = path.join(process.env.HOME, '.shelly', 'conns');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return {
     info: path.join(dir, `${seed}.json`),

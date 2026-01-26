@@ -62,8 +62,8 @@ class SeedState {
   }
 }
 
-if (!global.telesshState) {
-  global.telesshState = new SeedState();
+if (!global.shellyState) {
+  global.shellyState = new SeedState();
 }
 
-module.exports = global.telesshState;
+module.exports = global.shellyState;

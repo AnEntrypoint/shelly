@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 function getSocketPath(seed) {
-  return path.join(process.env.HOME, '.telessh', `daemon-${seed}.sock`);
+  return path.join(process.env.HOME, '.shelly', `daemon-${seed}.sock`);
 }
 
 function sendToDaemon(seed, msg) {

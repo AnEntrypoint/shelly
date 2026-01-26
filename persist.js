@@ -4,7 +4,7 @@ const crypto = require('crypto');
 
 class StatePersistence {
   constructor() {
-    this.stateDir = path.join(process.env.HOME || '/tmp', '.telessh', 'seeds');
+    this.stateDir = path.join(process.env.HOME || '/tmp', '.shelly', 'seeds');
     this.ensureDir();
   }
 
@@ -66,8 +66,8 @@ class StatePersistence {
   }
 }
 
-if (!global.telesshPersist) {
-  global.telesshPersist = new StatePersistence();
+if (!global.shellyPersist) {
+  global.shellyPersist = new StatePersistence();
 }
 
-module.exports = global.telesshPersist;
+module.exports = global.shellyPersist;

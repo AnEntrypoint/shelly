@@ -33,7 +33,7 @@ shelly disconnect --seed work
 ## Seeds
 
 A seed uniquely identifies a connection context. Same seed restores previous state:
-- State saved to `~/.telessh/seeds/{SHA256(seed)}.json`
+- State saved to `~/.shelly/seeds/{SHA256(seed)}.json`
 - Each seed completely isolated
 - Reusing seed in any CLI call resumes previous connection
 
@@ -87,7 +87,7 @@ shelly disconnect --seed <id>
 - State auto-saves after each command execution
 - Survives process termination and system restart
 - Reuse same seed to resume from previous state
-- State stored at `~/.telessh/seeds/{SHA256(seed)}.json`
+- State stored at `~/.shelly/seeds/{SHA256(seed)}.json`
 
 ## Multiple Sessions
 
