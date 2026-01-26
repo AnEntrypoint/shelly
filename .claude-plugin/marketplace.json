@@ -1,0 +1,49 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "telessh",
+  "description": "Seeded HyperSSH connection manager with plugin architecture and marketplace",
+  "version": "2.0.0",
+  "owner": {
+    "name": "Telessh",
+    "email": "support@telessh.dev"
+  },
+  "metadata": {
+    "description": "Complete skill system for managing seeded HyperSSH connections with dynamic plugin loading, registry, and marketplace support",
+    "version": "2.0.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "telessh",
+      "description": "Seeded HyperSSH connection skill with 100% predictable structure, plugin architecture, and marketplace support",
+      "source": "./",
+      "version": "2.0.0",
+      "author": {
+        "name": "Telessh",
+        "email": "support@telessh.dev"
+      },
+      "homepage": "https://github.com/AnEntrypoint/shelly",
+      "repository": "https://github.com/AnEntrypoint/shelly",
+      "license": "ISC",
+      "keywords": [
+        "ssh",
+        "hyperssh",
+        "seeded",
+        "connection",
+        "plugin",
+        "skill",
+        "marketplace"
+      ],
+      "category": "development",
+      "tags": [
+        "networking",
+        "remote-access",
+        "plugin-system"
+      ],
+      "strict": false,
+      "skills": [
+        "./skill"
+      ]
+    }
+  ]
+}

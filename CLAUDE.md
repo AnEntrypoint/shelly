@@ -38,17 +38,10 @@
 - Same seed = same validation rules, error messages, command outputs
 - External systems (SSH servers) are non-deterministic regardless of seed
 
-## Marketplace Implementation
-- PluginMarketplace requires indexData config option to load plugins; empty without it
-- MarketplaceAPI requires marketplace instance; cannot function standalone
-- discover() returns sliced array, pagination handles offset correctly
-- getFeatured()/getTrending() return empty array if no plugins marked featured/trending
-- Rating calculation: sum / count, rounded to 2 decimals; avoid division by zero
-- Trending algorithm: (timeScore × 0.3) + (downloadScore × 0.4) + (ratingScore × 0.3)
-- Index data structure: marketplace.plugins object keyed by plugin name (not array)
-- Review submission increments rating aggregate atomically; no race conditions
-- Installation tracking uses Set; simultaneous install/uninstall may conflict
-- Categories initialized on PluginMarketplace construction; adding categories requires reinit
-- Search is case-insensitive substring match; no fuzzy matching
-- Validation strict on name format (lowercase alphanumeric-hyphen only)
-- Plugin metadata immutable after registration; no update() method
+## Plugin Marketplace (.claude-plugin/marketplace.json)
+- Schema URL: https://anthropic.com/claude-code/marketplace.schema.json
+- Plugin source can be relative path ("./") or GitHub/Git URL with ref and sha
+- Relative skill paths are resolved against plugin's installation directory
+- Reserved marketplace names: claude-code-marketplace, claude-plugins-official, etc.
+- ${CLAUDE_PLUGIN_ROOT} variable available in hooks/MCP configs for plugin root references
+- strict: false allows plugin to work without separate plugin.json file
