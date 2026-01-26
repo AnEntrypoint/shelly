@@ -1,0 +1,111 @@
+{
+  "version": "1.0.0",
+  "marketplace": {
+    "categories": [
+      {
+        "id": "core",
+        "name": "Core",
+        "description": "Essential plugins for telessh operation",
+        "featured": ["session", "buffer", "logging", "validation"]
+      },
+      {
+        "id": "networking",
+        "name": "Networking",
+        "description": "Network and connectivity plugins",
+        "featured": []
+      },
+      {
+        "id": "storage",
+        "name": "Storage",
+        "description": "Storage and persistence plugins",
+        "featured": []
+      },
+      {
+        "id": "logging",
+        "name": "Logging",
+        "description": "Logging and monitoring plugins",
+        "featured": []
+      },
+      {
+        "id": "validation",
+        "name": "Validation",
+        "description": "Data validation and security plugins",
+        "featured": []
+      },
+      {
+        "id": "security",
+        "name": "Security",
+        "description": "Security and encryption plugins",
+        "featured": []
+      },
+      {
+        "id": "ui",
+        "name": "UI",
+        "description": "User interface and CLI plugins",
+        "featured": []
+      }
+    ],
+    "plugins": {
+      "session": {
+        "name": "session",
+        "version": "1.0.0",
+        "description": "Session management and lifecycle hooks",
+        "author": "telessh",
+        "category": "core",
+        "rating": 5,
+        "hooks": [
+          "session:pre-connect",
+          "session:post-connect",
+          "session:pre-send",
+          "session:post-send",
+          "session:pre-disconnect"
+        ],
+        "featured": true
+      },
+      "buffer": {
+        "name": "buffer",
+        "version": "1.0.0",
+        "description": "Buffer management for session data",
+        "author": "telessh",
+        "category": "core",
+        "rating": 5,
+        "hooks": [
+          "session:created",
+          "session:deleted",
+          "data:received",
+          "buffer:get",
+          "buffer:clear"
+        ],
+        "featured": true
+      },
+      "logging": {
+        "name": "logging",
+        "version": "1.0.0",
+        "description": "Comprehensive logging and audit trail",
+        "author": "telessh",
+        "category": "core",
+        "rating": 5,
+        "hooks": [
+          "session:created",
+          "session:deleted",
+          "log:entry"
+        ],
+        "featured": true
+      },
+      "validation": {
+        "name": "validation",
+        "version": "1.0.0",
+        "description": "Input validation and security checks",
+        "author": "telessh",
+        "category": "core",
+        "rating": 5,
+        "hooks": [
+          "validate:input",
+          "validate:session",
+          "validate:data"
+        ],
+        "featured": true
+      }
+    }
+  }
+}

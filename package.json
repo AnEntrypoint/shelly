@@ -1,0 +1,34 @@
+{
+  "name": "telessh",
+  "version": "2.0.0",
+  "description": "Telessh - Seeded HyperSSH connection manager with plugin architecture and marketplace",
+  "main": "index.js",
+  "bin": {
+    "telessh": "./cli.js"
+  },
+  "scripts": {
+    "start": "node cli.js",
+    "skill": "node skill/index.js",
+    "test": "node test-skill.js && node test-integration.js"
+  },
+  "keywords": [
+    "ssh",
+    "hyperssh",
+    "seeded",
+    "connection",
+    "remote",
+    "plugin",
+    "skill",
+    "claude",
+    "marketplace"
+  ],
+  "author": "telessh",
+  "license": "ISC",
+  "dependencies": {
+    "hyperssh": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+
