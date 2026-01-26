@@ -68,11 +68,13 @@ class AtomicSkill {
     if (!text) throw new Error('text required');
 
     proc.send(ctx.seed, text);
+    const data = proc.receive(ctx.seed);
     return {
       status: 'success',
-      message: 'Sent',
+      message: 'Sent and received',
       seed: ctx.seed,
-      text
+      command: text,
+      output: data
     };
   }
 
