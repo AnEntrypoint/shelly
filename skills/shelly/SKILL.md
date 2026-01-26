@@ -1,76 +1,161 @@
 ---
 name: shelly
-description: Atomic CLI commands for seeded HyperSSH connections with persistent daemon-based connections.
+description: Persistent HyperSSH connections with atomic CLI commands. Spawns background daemons to maintain connections between invocations.
 disable-model-invocation: false
 ---
 
 # Shelly - Seeded HyperSSH Connection Manager
 
-Run as: `npx -y gxe@latest AnEntrypoint/shelly cli <command>`
+Persistent SSH connections through background daemons. Each CLI call is atomic and returns immediately while daemons maintain connections.
+
+**Usage:** `npx -y gxe@latest AnEntrypoint/shelly cli <command> [options]`
 
 ## Quick Start
 
 ```bash
+# Start persistent connection (spawns daemon)
 npx -y gxe@latest AnEntrypoint/shelly cli connect --seed myserver
+
+# Send command (reuses daemon, auto-receives output)
 npx -y gxe@latest AnEntrypoint/shelly cli send --text "ls -la"
+
+# Check status
+npx -y gxe@latest AnEntrypoint/shelly cli status
+
+# Terminate daemon
 npx -y gxe@latest AnEntrypoint/shelly cli disconnect
 ```
 
 ## Commands
 
 ### connect --seed <id>
-Spawns background daemon maintaining persistent SSH connection.
+Spawns background daemon that maintains persistent HyperSSH connection.
+- Creates `~/.shelly/daemon-{seed}.sock` for IPC
+- Saves `~/.shelly/current-seed` for session tracking
+- Returns JSON with status, user, seed
 
-### send --text "<cmd>"
-Executes command via daemon, auto-receives output. Returns `{command, output}`.
+### send --text "<command>"
+Execute command via daemon, returns output immediately.
+- Auto-receives output (no separate receive needed)
+- Returns: `{status, command, output}`
+- Can use current-seed implicitly or specify `--seed <id>`
+- Daemon handles actual execution via hyperssh
 
 ### receive
-Gets buffered output (empty if already consumed by send).
+Manually retrieve buffered output.
+- Empty if already consumed by send
+- Returns: `{status, data}`
+- Rare usage (send auto-receives)
 
 ### status
-Shows connection status.
+Show connection and daemon status.
+- Returns: `{status, seed, connected, user, connectedAt}`
+- Uses current-seed if available
 
 ### disconnect
-Terminates daemon, cleans socket.
+Terminate daemon gracefully.
+- Removes `~/.shelly/current-seed`
+- Cleans socket: `~/.shelly/daemon-{seed}.sock`
+- Triggers daemon shutdown via IPC
 
 ### serve --seed <id> [--port <port>]
-Starts persistent server, auto-selects port if not provided.
+Start persistent server daemon.
+- Port auto-selected if not provided (9000-9999)
+- Returns: `{status, seed, port, pid, connectWith}`
+- Stores state in `~/.shelly/seeds/{SHA256(seed)}.json`
 
 ### stop
-Stops server daemon.
+Terminate server daemon.
+- Requires `--seed <id>` or active seed via `--seed`
+- Or uses current-seed if available
+- Cleans server socket
 
 ## Session-Like Workflow
 
-After connect, subsequent commands don't need --seed:
+Connect once, send multiple commands without repeating --seed:
+
 ```bash
 npx -y gxe@latest AnEntrypoint/shelly cli connect --seed work
 npx -y gxe@latest AnEntrypoint/shelly cli send --text "pwd"
-npx -y gxe@latest AnEntrypoint/shelly cli send --text "ls"
+npx -y gxe@latest AnEntrypoint/shelly cli send --text "ls /var"
+npx -y gxe@latest AnEntrypoint/shelly cli send --text "whoami"
+npx -y gxe@latest AnEntrypoint/shelly cli status
 npx -y gxe@latest AnEntrypoint/shelly cli disconnect
 ```
 
-Seed stored in `~/.shelly/current-seed`, auto-read by commands.
+Active seed stored in `~/.shelly/current-seed`, automatically read by commands.
 
-## Multiple Sessions
+## Multi-Seed Sessions
 
-Different seeds for independent daemons:
+Run independent daemons simultaneously with different seeds:
+
 ```bash
-npx -y gxe@latest AnEntrypoint/shelly cli connect --seed api
-npx -y gxe@latest AnEntrypoint/shelly cli connect --seed db
-npx -y gxe@latest AnEntrypoint/shelly cli send --seed api --text "curl /health"
-npx -y gxe@latest AnEntrypoint/shelly cli send --seed db --text "psql mydb"
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed api-prod
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed db-prod
+npx -y gxe@latest AnEntrypoint/shelly cli send --seed api-prod --text "curl /health"
+npx -y gxe@latest AnEntrypoint/shelly cli send --seed db-prod --text "SELECT 1"
 ```
 
-## State
+Each seed has isolated daemon, state, and connection.
 
-- Persists in `~/.shelly/seeds/{SHA256(seed)}.json`
-- Daemons listen on `~/.shelly/daemon-{seed}.sock`
-- Current seed in `~/.shelly/current-seed`
+## Architecture
 
-## Error Format
+### Persistent Daemons
+- Background process per seed
+- Listens on Unix socket: `~/.shelly/daemon-{seed}.sock`
+- Maintains single HyperSSH connection
+- Queues and executes commands
+- Survives CLI process exit
+- Terminated on disconnect/stop
 
+### IPC Protocol
+- CLI connects to daemon socket
+- Sends JSON: `{"type": "send", "text": "..."}`
+- Daemon executes via hyperssh (30s timeout)
+- Returns JSON: `{"status": "success", "output": "..."}`
+- Socket timeout: 5s per request
+
+### State Files
+- Connection state: `~/.shelly/seeds/{SHA256(seed)}.json`
+- Daemon socket: `~/.shelly/daemon-{seed}.sock`
+- Active seed: `~/.shelly/current-seed`
+
+## Response Format
+
+Success:
 ```json
-{"status": "error", "error": "...", "seed": "...", "command": "..."}
+{
+  "status": "success",
+  "message": "...",
+  "seed": "...",
+  "command": "...",
+  "output": "..."
+}
 ```
 
-Exit 1 on error, 0 on success.
+Error:
+```json
+{
+  "status": "error",
+  "error": "error message",
+  "seed": "...",
+  "command": "..."
+}
+```
+
+Exit code: 0 on success, 1 on error
+
+## Daemon Persistence
+
+Daemons persist until explicitly terminated:
+- Survive CLI process exit
+- Reuse with same seed: `connect --seed X` reconnects
+- Prevent reconnection overhead
+- Clean shutdown: `disconnect` or `stop`
+
+## HyperSSH Integration
+
+- Requires 32-byte seeds (hypercore-id-encoding)
+- Commands executed via: `npx hyperssh -s <seed> -u <user> -e "<command>"`
+- User auto-derived from system username
+- Timeout: 30 seconds per command
