@@ -1,43 +1,19 @@
 # Technical Caveats
 
-## Atomic Command Model
-- Each CLI invocation executes exactly one command and exits
-- No persistent shell or REPL
-- State managed entirely via seed-based persistence, not session IDs
-- execute() returns result synchronously; no async waiting
+## Atomic Command Model (Critical Design)
+Each CLI invocation executes one command and exits. State persists via files, not sessions. No REPL. No persistent process. Each call is independent and atomic.
 
-## Seed-Based State Persistence
-- Seed uniquely identifies connection context across CLI invocations
-- Same seed parameter restores previous state from ~/.telessh/seeds/{seed-hash}.json
-- State loaded on access via state.get(seed), auto-saved after each command
-- Each seed is completely isolated; no cross-seed state sharing
+## Seed-Based State Files
+State persists in `~/.telessh/seeds/{SHA256(seed)}.json`. Seed uniquely identifies connection context. Same seed in new process auto-restores previous state. Each seed completely isolated from others.
 
-## State File Format
-- State files stored at: ~/.telessh/seeds/{SHA256(seed)}.json
-- Location determined by crypto.createHash('sha256').update(seed).digest('hex')
-- Directory created automatically on first use
-- File permissions inherited from process umask
+## execSync with HyperSSH
+exec() uses `execSync('npx hyperssh -s <seed> -u <user> -e "<command>"')` with 30s timeout. Output captured as string. Shells special chars in command with double quotes.
 
-## Core Commands
-- connect: establishes connection state (requires hypersshSeed and user)
-- exec: executes command via HyperSSH (requires connected state)
-- status: shows connection state and metadata
-- disconnect: clears connection but preserves state file
+## 32-Byte Seed Requirement
+HyperSSH/hyperdht requires exactly 32-byte seeds (base32 encoded). Invalid seeds cause "ID must be 32-bytes long" error from hypercore-id-encoding. Real seeds from hyper infrastructure only.
 
-## Connection Lifecycle
-- connect() establishes state but does NOT keep process alive
-- exec() requires connected state; fails if not connected first
-- disconnect() clears connection but preserves state file
-- State persists even after disconnect; can reconnect with same seed later
+## JSON Error Format
+All errors return `{status: 'error', error: 'message', seed, command}` with exit code 1. Clients must check status field, not exit code alone. stdout contains all output (success and errors).
 
-## Command Execution
-- exec() uses execSync() with real HyperSSH: `npx hyperssh -s <seed> -u <user> -e "<command>"`
-- Output returned as string in result.output
-- 30s timeout per command execution
-- Invalid seeds cause "ID must be 32-bytes long" error from hyperdht
-
-## Error Handling
-- All errors return {status: 'error', error: 'message'} with exit code 1
-- No exceptions escape; caught at command boundary
-- Missing required args throw validation errors with clear messages
-- HyperSSH connection failures captured as error strings in result
+## State File Isolation
+No cross-seed state sharing. Disconnect preserves state file. Can reconnect to same host with same seed. Requires explicit connect before exec. Missing hypersshSeed or user validates before attempting connection.
