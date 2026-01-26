@@ -50,15 +50,16 @@ async function main() {
 
   if (!cmd) {
     console.error('Error: command required');
-    console.error('Usage: shelly <command> [--seed <id>] [options]');
+    console.error('Usage: npx -y gxe@latest AnEntrypoint/shelly cli <command> [--seed <id>] [options]');
+    console.error('');
     console.error('Commands:');
-    console.error('  connect --seed <id>');
-    console.error('  send --text "<text>"');
-    console.error('  receive');
-    console.error('  status');
-    console.error('  disconnect');
-    console.error('  serve --seed <id> [--port <port>]');
-    console.error('  stop');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli connect --seed <id>');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli send --text "<text>"');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli receive');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli status');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli disconnect');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli serve --seed <id> [--port <port>]');
+    console.error('  npx -y gxe@latest AnEntrypoint/shelly cli stop');
     process.exit(1);
   }
 

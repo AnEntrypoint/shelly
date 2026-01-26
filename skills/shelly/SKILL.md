@@ -1,122 +1,76 @@
 ---
 name: shelly
-description: Atomic CLI commands for seeded HyperSSH connections with persistent state management.
+description: Atomic CLI commands for seeded HyperSSH connections with persistent daemon-based connections.
 disable-model-invocation: false
 ---
 
 # Shelly - Seeded HyperSSH Connection Manager
 
-Shelly manages HyperSSH connections via atomic CLI commands with seed-based state persistence. Each command is independent; state survives across CLI invocations and process restarts.
+Run as: `npx -y gxe@latest AnEntrypoint/shelly cli <command>`
 
 ## Quick Start
 
-Establish connection:
 ```bash
-shelly connect --seed work --hypersshSeed prod-server --user alice
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed myserver
+npx -y gxe@latest AnEntrypoint/shelly cli send --text "ls -la"
+npx -y gxe@latest AnEntrypoint/shelly cli disconnect
 ```
-
-Execute command:
-```bash
-shelly exec --seed work --command "ls -la"
-```
-
-Check status:
-```bash
-shelly status --seed work
-```
-
-Disconnect:
-```bash
-shelly disconnect --seed work
-```
-
-## Seeds
-
-A seed uniquely identifies a connection context. Same seed restores previous state:
-- State saved to `~/.shelly/seeds/{SHA256(seed)}.json`
-- Each seed completely isolated
-- Reusing seed in any CLI call resumes previous connection
 
 ## Commands
 
-### connect
+### connect --seed <id>
+Spawns background daemon maintaining persistent SSH connection.
 
-Establish connection to a remote host.
+### send --text "<cmd>"
+Executes command via daemon, auto-receives output. Returns `{command, output}`.
 
-```bash
-shelly connect --seed <id> --hypersshSeed <host> --user <user>
-```
-
-Example:
-```bash
-shelly connect --seed work --hypersshSeed prod-01 --user alice
-```
-
-### exec
-
-Execute command on connected host.
-
-```bash
-shelly exec --seed <id> --command <cmd>
-```
-
-Example:
-```bash
-shelly exec --seed work --command "ls -la /var"
-```
+### receive
+Gets buffered output (empty if already consumed by send).
 
 ### status
-
-Show connection status and metadata.
-
-```bash
-shelly status --seed <id>
-```
+Shows connection status.
 
 ### disconnect
+Terminates daemon, cleans socket.
 
-Close connection (state file preserved).
+### serve --seed <id> [--port <port>]
+Starts persistent server, auto-selects port if not provided.
 
+### stop
+Stops server daemon.
+
+## Session-Like Workflow
+
+After connect, subsequent commands don't need --seed:
 ```bash
-shelly disconnect --seed <id>
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed work
+npx -y gxe@latest AnEntrypoint/shelly cli send --text "pwd"
+npx -y gxe@latest AnEntrypoint/shelly cli send --text "ls"
+npx -y gxe@latest AnEntrypoint/shelly cli disconnect
 ```
 
-
-## State Persistence
-
-- State auto-saves after each command execution
-- Survives process termination and system restart
-- Reuse same seed to resume from previous state
-- State stored at `~/.shelly/seeds/{SHA256(seed)}.json`
+Seed stored in `~/.shelly/current-seed`, auto-read by commands.
 
 ## Multiple Sessions
 
-Use different seeds for independent connections:
-
+Different seeds for independent daemons:
 ```bash
-shelly connect --seed api-server --hypersshSeed api-prod --user alice
-shelly connect --seed database --hypersshSeed db-prod --user bob
-
-shelly exec --seed api-server --command "curl /health"
-shelly exec --seed database --command "pg_dump mydb"
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed api
+npx -y gxe@latest AnEntrypoint/shelly cli connect --seed db
+npx -y gxe@latest AnEntrypoint/shelly cli send --seed api --text "curl /health"
+npx -y gxe@latest AnEntrypoint/shelly cli send --seed db --text "psql mydb"
 ```
 
-Each seed maintains completely isolated state.
+## State
 
-## Error Handling
+- Persists in `~/.shelly/seeds/{SHA256(seed)}.json`
+- Daemons listen on `~/.shelly/daemon-{seed}.sock`
+- Current seed in `~/.shelly/current-seed`
 
-All errors return JSON with status field:
+## Error Format
 
 ```json
-{
-  "status": "error",
-  "error": "error message",
-  "seed": "...",
-  "command": "..."
-}
+{"status": "error", "error": "...", "seed": "...", "command": "..."}
 ```
 
-Exit code 1 on error, 0 on success. Common errors:
-- Missing required args: `error: <fieldname> required`
-- Not connected: `error: Not connected. Call connect first`
-- Unknown command: `error: Unknown command: <cmd>`
+Exit 1 on error, 0 on success.
