@@ -1,103 +1,107 @@
 ---
 name: shelly
-description: Interactive REPL for seeded HyperSSH connections with persistent state management.
+description: Atomic CLI commands for seeded HyperSSH connections with persistent state management.
 disable-model-invocation: false
 ---
 
 # Shelly - Seeded HyperSSH Connection Manager
 
-Shelly provides an interactive REPL for managing HyperSSH connections with seed-based state persistence. One session per seed, with state surviving process restarts.
+Shelly manages HyperSSH connections via atomic CLI commands with seed-based state persistence. Each command is independent; state survives across CLI invocations and process restarts.
 
 ## Quick Start
 
-### Interactive Session
-
+Establish connection:
 ```bash
-shelly serve --seed my-conn
+shelly connect --seed work --hypersshSeed prod-server --user alice
 ```
 
-Inside the session:
-
-```
-shelly> connect remote-host alice
-✓ Connected to remote-host as alice
-
-shelly> exec ls -la
-✓ Executed: ls -la
-
-shelly> read
---- Output ---
-$ ls -la
-Executed on remote-host
---- End ---
-
-shelly> exit
-✓ Exiting session
-```
-
-### Quick Status Check
-
+Execute command:
 ```bash
-shelly connect --seed my-conn
-Session: my-conn
-Connected: true
-Host: remote-host
-User: alice
+shelly exec --seed work --command "ls -la"
+```
+
+Check status:
+```bash
+shelly status --seed work
+```
+
+Disconnect:
+```bash
+shelly disconnect --seed work
 ```
 
 ## Seeds
 
-A seed uniquely identifies a connection context. Same seed reopens the previous session:
-- State saved to `~/.telessh/seeds/{seed-hash}.json`
+A seed uniquely identifies a connection context. Same seed restores previous state:
+- State saved to `~/.telessh/seeds/{SHA256(seed)}.json`
 - Each seed completely isolated
-- Reusing seed resumes previous connection
+- Reusing seed in any CLI call resumes previous connection
 
-## REPL Commands (serve mode)
+## Commands
 
-### connect \<host\> \<user\>
+### connect
 
 Establish connection to a remote host.
 
-```
-shelly> connect my-server alice
-✓ Connected to my-server as alice
-```
-
-### exec \<command\>
-
-Execute command on connected host. Output stored in buffer.
-
-```
-shelly> exec ls -la
-✓ Executed: ls -la
+```bash
+shelly connect --seed <id> --hypersshSeed <host> --user <user>
 ```
 
-### read
-
-Display buffered output and clear it.
-
-```
-shelly> read
---- Output ---
-$ ls -la
-Executed on my-server
---- End ---
+Example:
+```bash
+shelly connect --seed work --hypersshSeed prod-01 --user alice
 ```
 
-### exit
+### exec
 
-Close session and save state. State persists for next session with same seed.
+Execute command on connected host.
 
+```bash
+shelly exec --seed <id> --command <cmd>
 ```
-shelly> exit
-✓ Exiting session
+
+Example:
+```bash
+shelly exec --seed work --command "ls -la /var"
+```
+
+### status
+
+Show connection status and metadata.
+
+```bash
+shelly status --seed <id>
+```
+
+### disconnect
+
+Close connection (state file preserved).
+
+```bash
+shelly disconnect --seed <id>
+```
+
+### export
+
+Export state as JSON.
+
+```bash
+shelly export --seed <id>
+```
+
+### import
+
+Import previously exported state.
+
+```bash
+shelly import --seed <id> --data <json>
 ```
 
 ## State Persistence
 
-- State auto-saves after each command
-- Survives session exit and process restart
-- Access with same seed to resume previous connection
+- State auto-saves after each command execution
+- Survives process termination and system restart
+- Reuse same seed to resume from previous state
 - State stored at `~/.telessh/seeds/{SHA256(seed)}.json`
 
 ## Multiple Sessions
@@ -105,23 +109,29 @@ shelly> exit
 Use different seeds for independent connections:
 
 ```bash
-shelly serve --seed api-server
-# ... do work ...
+shelly connect --seed api-server --hypersshSeed api-prod --user alice
+shelly connect --seed database --hypersshSeed db-prod --user bob
 
-# In another terminal
-shelly serve --seed database
-# ... do work ...
+shelly exec --seed api-server --command "curl /health"
+shelly exec --seed database --command "pg_dump mydb"
 ```
 
-Check status of any session without opening it:
-
-```bash
-shelly connect --seed api-server
-```
+Each seed maintains completely isolated state.
 
 ## Error Handling
 
-- Missing required args: `✗ Usage: connect <host> <user>`
-- Not connected: `✗ Not connected. Use: connect <host> <user>`
-- Unknown command: displays available commands
-- Errors prefixed with `✗` on stderr
+All errors return JSON with status field:
+
+```json
+{
+  "status": "error",
+  "error": "error message",
+  "seed": "...",
+  "command": "..."
+}
+```
+
+Exit code 1 on error, 0 on success. Common errors:
+- Missing required args: `error: <fieldname> required`
+- Not connected: `error: Not connected. Call connect first`
+- Unknown command: `error: Unknown command: <cmd>`

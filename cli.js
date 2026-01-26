@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-const SessionRepl = require('./repl');
-const state = require('./state');
+const AtomicSkill = require('./skill/skill');
 
 function parseArgs(argv) {
   const args = {};
@@ -15,46 +14,66 @@ function parseArgs(argv) {
       } else {
         args[key] = true;
       }
-    } else if (!args._mode) {
-      args._mode = argv[i];
+    } else if (!args._cmd) {
+      args._cmd = argv[i];
     }
   }
   return args;
 }
 
-async function main() {
+function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
 
-  const mode = args._mode || 'serve';
   const seed = args.seed;
+  const cmd = args._cmd;
 
   if (!seed) {
     console.error('Error: --seed required');
-    console.error('Usage:');
-    console.error('  shelly serve --seed <id>      # Interactive session');
-    console.error('  shelly connect --seed <id>    # Quick connect and close');
+    console.error('Usage: shelly <command> --seed <id> [options]');
+    console.error('Commands:');
+    console.error('  connect --seed <id> --hypersshSeed <host> --user <user>');
+    console.error('  exec --seed <id> --command <cmd>');
+    console.error('  status --seed <id>');
+    console.error('  disconnect --seed <id>');
+    console.error('  export --seed <id>');
+    console.error('  import --seed <id> --data <json>');
     process.exit(1);
   }
 
-  if (mode === 'serve') {
-    const repl = new SessionRepl(seed);
-    await repl.start();
-  } else if (mode === 'connect') {
-    const ctx = state.get(seed);
-    console.log(`Session: ${seed}`);
-    console.log(`Connected: ${ctx.connected}`);
-    if (ctx.connected) {
-      console.log(`Host: ${ctx.hypersshSeed}`);
-      console.log(`User: ${ctx.user}`);
+  if (!cmd) {
+    console.error('Error: command required');
+    process.exit(1);
+  }
+
+  try {
+    let commandArgs = {};
+
+    switch (cmd) {
+      case 'connect':
+        commandArgs = {
+          hypersshSeed: args.hypersshSeed,
+          user: args.user
+        };
+        break;
+      case 'exec':
+        commandArgs = { command: args.command };
+        break;
+      case 'send':
+        commandArgs = { data: args.data };
+        break;
+      case 'import':
+        commandArgs = { data: args.data };
+        break;
     }
-  } else {
-    console.error(`Unknown mode: ${mode}`);
+
+    const result = AtomicSkill.execute(seed, cmd, commandArgs);
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.status === 'error' ? 1 : 0);
+  } catch (err) {
+    console.error('Fatal error:', err.message);
     process.exit(1);
   }
 }
 
-main().catch(err => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+main();
