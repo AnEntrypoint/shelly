@@ -18,8 +18,49 @@ if (fs.existsSync(socketPath)) {
   fs.unlinkSync(socketPath);
 }
 
-let user = userInfo().username;
-let connected = true;
+const user = userInfo().username;
+let isAlive = true;
+
+function exitGracefully() {
+  isAlive = false;
+  if (fs.existsSync(socketPath)) {
+    try { fs.unlinkSync(socketPath); } catch (e) {}
+  }
+  const seedFile = path.join(process.env.HOME, '.shelly', 'current-seed');
+  if (fs.existsSync(seedFile)) {
+    try { fs.unlinkSync(seedFile); } catch (e) {}
+  }
+  process.exit(0);
+}
+
+function isConnectionError(errMsg) {
+  return /Connection reset|Connection refused|read: Connection reset|write: EPIPE|ECONNREFUSED|ETIMEDOUT|kex_exchange_identification/.test(errMsg);
+}
+
+function executeSend(text) {
+  return new Promise((resolve) => {
+    if (!isAlive) {
+      return resolve('ERROR: Daemon shutting down\n');
+    }
+
+    try {
+      const output = execSync(
+        `npx hyperssh -s ${seed} -u ${user} -e "${text.replace(/"/g, '\\"')}"`,
+        { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      resolve(output);
+    } catch (err) {
+      const errMsg = err.message || '';
+
+      if (isConnectionError(errMsg)) {
+        resolve(`ERROR: Remote connection closed\n`);
+        exitGracefully();
+      } else {
+        resolve(`ERROR: ${errMsg}\n`);
+      }
+    }
+  });
+}
 
 const server = net.createServer((socket) => {
   let input = '';
@@ -31,12 +72,21 @@ const server = net.createServer((socket) => {
     const line = input.trim();
     input = '';
 
-    try {
-      const msg = JSON.parse(line);
-      handleCommand(msg, socket);
-    } catch (err) {
-      socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n');
+    const msg = JSON.parse(line);
+    if (msg.type === 'send') {
+      executeSend(msg.text)
+        .then((output) => {
+          socket.write(JSON.stringify({ status: 'success', output }) + '\n');
+          socket.end();
+        })
+        .catch((err) => {
+          socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n');
+          socket.end();
+        });
+    } else if (msg.type === 'disconnect') {
+      socket.write(JSON.stringify({ status: 'success' }) + '\n');
       socket.end();
+      setTimeout(exitGracefully, 100);
     }
   });
 
@@ -44,56 +94,8 @@ const server = net.createServer((socket) => {
   socket.on('end', () => {});
 });
 
-function handleCommand(msg, socket) {
-  if (msg.type === 'send') {
-    executeSend(msg.text)
-      .then((output) => {
-        socket.write(JSON.stringify({ status: 'success', output }) + '\n');
-        socket.end();
-      })
-      .catch((err) => {
-        socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n');
-        socket.end();
-      });
-  } else if (msg.type === 'disconnect') {
-    socket.write(JSON.stringify({ status: 'success' }) + '\n');
-    socket.end();
-    setTimeout(() => process.exit(0), 100);
-  } else {
-    socket.write(JSON.stringify({ status: 'error', error: 'Unknown command' }) + '\n');
-    socket.end();
-  }
-}
-
-function executeSend(text) {
-  return new Promise((resolve) => {
-    try {
-      const output = execSync(
-        `npx hyperssh -s ${seed} -u ${user} -e "${text.replace(/"/g, '\\"')}"`,
-        { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-      resolve(output);
-    } catch (err) {
-      resolve(`ERROR: ${err.message}\n`);
-    }
-  });
-}
-
 server.listen(socketPath, () => {});
 
-process.on('SIGTERM', () => {
-  server.close();
-  if (fs.existsSync(socketPath)) {
-    fs.unlinkSync(socketPath);
-  }
-  process.exit(0);
-});
-
+process.on('SIGTERM', exitGracefully);
 process.on('SIGHUP', () => {});
-process.on('SIGINT', () => {
-  server.close();
-  if (fs.existsSync(socketPath)) {
-    fs.unlinkSync(socketPath);
-  }
-  process.exit(0);
-});
+process.on('SIGINT', exitGracefully);

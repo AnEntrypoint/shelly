@@ -38,3 +38,6 @@ After `connect --seed <id>`, the seed is stored in ~/.shelly/current-seed. Subse
 
 ## Daemon Reboot Behavior
 Daemon processes don't survive system reboot but ~/.shelly/current-seed file persists. After reboot, current-seed file may reference a dead daemon. Commands will fail with "Not connected" error. Solution: run `disconnect` to clear stale current-seed, then `connect --seed <id>` to spawn new daemon. Or use explicit `--seed` to bypass current-seed file entirely.
+
+## Connection Error Detection
+Daemon detects remote SSH connection closure via execSync error pattern matching: `Connection reset|Connection refused|read: Connection reset|write: EPIPE|ECONNREFUSED|ETIMEDOUT|kex_exchange_identification`. When connection error detected, daemon immediately calls exitGracefully() which removes socket file ~/.shelly/daemon-{seed}.sock and current-seed file, then exits. Prevents daemon from staying alive with dead connection. Next CLI command finds missing socket and returns "Daemon not running. Run 'connect --seed <id>' first" - user can reconnect with single command.

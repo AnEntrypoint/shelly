@@ -65,10 +65,18 @@ function startDaemon(seed) {
 
   daemon.unref();
 
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ pid: daemon.pid, seed });
-    }, 100);
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const checkSocket = () => {
+      if (fs.existsSync(socketPath)) {
+        resolve({ pid: daemon.pid, seed });
+      } else if (attempts++ < 50) {
+        setTimeout(checkSocket, 100);
+      } else {
+        reject(new Error('Daemon failed to start'));
+      }
+    };
+    checkSocket();
   });
 }
 
