@@ -1,8 +1,5 @@
 const state = require('../state');
-const server = require('../server');
-const proc = require('../process');
-const ipc = require('../ipc');
-const { userInfo } = require('os');
+const cmd = require('./commands');
 
 class AtomicSkill {
   static async execute(seed, command, args = {}) {
@@ -16,25 +13,25 @@ class AtomicSkill {
       let result;
       switch (command) {
         case 'connect':
-          result = await this.connect(ctx, args);
+          result = await cmd.connect(ctx, args);
           break;
         case 'send':
-          result = await this.send(ctx, args);
+          result = await cmd.send(ctx, args);
           break;
         case 'receive':
-          result = this.receive(ctx);
+          result = cmd.receive(ctx);
           break;
         case 'status':
-          result = this.status(ctx);
+          result = await cmd.status(ctx);
           break;
         case 'disconnect':
-          result = await this.disconnect(ctx);
+          result = await cmd.disconnect(ctx);
           break;
         case 'serve':
-          result = this.serve(ctx, args);
+          result = cmd.serve(ctx, args);
           break;
         case 'stop':
-          result = this.stopServing(ctx);
+          result = cmd.stopServing(ctx);
           break;
         default:
           throw new Error(`Unknown command: ${command}`);
@@ -44,134 +41,6 @@ class AtomicSkill {
     } catch (err) {
       return { status: 'error', error: err.message, seed, command };
     }
-  }
-
-  static async connect(ctx, args) {
-    const info = ipc.startDaemon(ctx.seed);
-    await info;
-    ctx.connected = true;
-    ctx.hypersshSeed = ctx.seed;
-    ctx.user = userInfo().username;
-    ctx.connectedAt = Date.now();
-    ctx.daemonPid = info.pid;
-    return {
-      status: 'success',
-      message: 'Connected',
-      seed: ctx.seed,
-      user: ctx.user
-    };
-  }
-
-  static async send(ctx, args) {
-    if (!ctx.connected) {
-      throw new Error('Not connected. Call connect first');
-    }
-    const { text } = args;
-    if (!text) throw new Error('text required');
-
-    const result = await ipc.sendToDaemon(ctx.seed, { type: 'send', text });
-    return {
-      status: 'success',
-      message: 'Sent and received',
-      seed: ctx.seed,
-      command: text,
-      output: result.output || ''
-    };
-  }
-
-  static receive(ctx) {
-    if (!ctx.connected) {
-      throw new Error('Not connected. Call connect first');
-    }
-    const data = proc.receive(ctx.seed);
-    return {
-      status: 'success',
-      message: 'Received',
-      seed: ctx.seed,
-      data
-    };
-  }
-
-  static status(ctx) {
-    const result = {
-      status: 'success',
-      seed: ctx.seed,
-      createdAt: new Date(ctx.createdAt).toISOString(),
-      lastCmd: ctx.lastCmd
-    };
-
-    if (ctx.serving) {
-      result.serving = true;
-      result.serverPort = ctx.serverPort;
-      result.serverPid = ctx.serverPid;
-      result.user = ctx.user;
-    } else {
-      result.connected = ctx.connected;
-      result.hypersshSeed = ctx.hypersshSeed;
-      result.user = ctx.user;
-      result.connectedAt = ctx.connectedAt ? new Date(ctx.connectedAt).toISOString() : null;
-    }
-
-    return result;
-  }
-
-  static async disconnect(ctx) {
-    if (ctx.connected) {
-      await ipc.stopDaemon(ctx.seed);
-    }
-    ctx.connected = false;
-    ctx.hypersshSeed = null;
-    ctx.user = null;
-    ctx.daemonPid = null;
-    return {
-      status: 'success',
-      message: 'Disconnected',
-      seed: ctx.seed
-    };
-  }
-
-  static serve(ctx, args) {
-    let { port } = args;
-    if (ctx.serving && ctx.serverPid) throw new Error('Already serving on this seed');
-
-    if (!port) {
-      port = 9000 + Math.floor(Math.random() * 1000);
-    }
-
-    const user = userInfo().username;
-    const info = server.start(ctx.seed, port, user);
-    ctx.serving = true;
-    ctx.serverPort = port;
-    ctx.serverPid = info.pid;
-    ctx.user = user;
-    server.restore(ctx.seed, info.pid, port, user);
-
-    return {
-      status: 'success',
-      message: 'Server started',
-      seed: ctx.seed,
-      port,
-      user,
-      pid: info.pid,
-      connectWith: `shelly connect --seed ${ctx.seed}`
-    };
-  }
-
-  static stopServing(ctx) {
-    if (!ctx.serving || !ctx.serverPid) {
-      throw new Error('No server running');
-    }
-
-    server.stop(ctx.serverPid);
-    ctx.serving = false;
-    ctx.serverPort = null;
-    ctx.serverPid = null;
-
-    return {
-      status: 'success',
-      message: 'Server stopped',
-      seed: ctx.seed
-    };
   }
 }
 
