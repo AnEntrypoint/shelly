@@ -41,3 +41,6 @@ Daemon processes don't survive system reboot but ~/.shelly/current-seed file per
 
 ## Connection Error Detection
 Daemon detects remote SSH connection closure via execSync error pattern matching: `Connection reset|Connection refused|read: Connection reset|write: EPIPE|ECONNREFUSED|ETIMEDOUT|kex_exchange_identification`. When connection error detected, daemon immediately calls exitGracefully() which removes socket file ~/.shelly/daemon-{seed}.sock and current-seed file, then exits. Prevents daemon from staying alive with dead connection. Next CLI command finds missing socket and returns "Daemon not running. Run 'connect --seed <id>' first" - user can reconnect with single command.
+
+## Health Checks After Reboot
+State files persist across reboot but daemon/server processes do not. Commands verify actual process health before executing: isDaemonHealthy() probes socket connection (not just file existence), isProcessAlive() verifies process via kill(pid, 0). Applied in send/status/disconnect/serve/stop before operations. When stale detected, state automatically cleared (ctx.connected=false, ctx.serving=false) and clear error returned directing user to reconnect. No manual cleanup needed. Reboot scenario: state file says connected=true but daemon dead, first status/send detects it immediately and clears state.
