@@ -38,7 +38,8 @@ function receive(ctx) {
 
 async function status(ctx) {
   const result = { status: 'success', seed: ctx.seed, createdAt: new Date(ctx.createdAt).toISOString(), lastCmd: ctx.lastCmd };
-  if (ctx.serving) {
+
+  if (ctx.serverPid) {
     const serverAlive = health.isProcessAlive(ctx.serverPid);
     result.serving = serverAlive;
     result.serverPort = ctx.serverPort;
@@ -50,13 +51,13 @@ async function status(ctx) {
       ctx.serverPort = null;
       ctx.serverPid = null;
     }
-  } else {
-    const daemonHealthy = ctx.connected ? await health.isDaemonHealthy(ctx.seed) : false;
+  } else if (ctx.connected) {
+    const daemonHealthy = await health.isDaemonHealthy(ctx.seed);
     result.connected = daemonHealthy;
     result.hypersshSeed = ctx.hypersshSeed;
     result.user = ctx.user;
     result.connectedAt = ctx.connectedAt ? new Date(ctx.connectedAt).toISOString() : null;
-    if (ctx.connected && !daemonHealthy) {
+    if (!daemonHealthy) {
       result.warning = 'Daemon is not responding. Stale connection detected. Run "connect --seed ' + ctx.seed + '" to reconnect';
       ctx.connected = false;
       ctx.hypersshSeed = null;

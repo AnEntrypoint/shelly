@@ -104,7 +104,7 @@ async function main() {
         commandArgs = {};
         break;
       case 'serve':
-        commandArgs = { port: args.port || null };
+        commandArgs = { port: args.port ? parseInt(args.port, 10) : null };
         break;
       case 'stop':
         commandArgs = {};
