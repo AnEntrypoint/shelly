@@ -6,6 +6,7 @@ const fs = require('fs');
 
 function parseArgs(argv) {
   const args = {};
+  let positionalIndex = 0;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {
       const key = argv[i].slice(2);
@@ -16,8 +17,12 @@ function parseArgs(argv) {
       } else {
         args[key] = true;
       }
-    } else if (!args._cmd) {
+    } else if (positionalIndex === 0) {
       args._cmd = argv[i];
+      positionalIndex++;
+    } else if (positionalIndex === 1) {
+      args._positional = argv[i];
+      positionalIndex++;
     }
   }
   return args;
@@ -87,7 +92,7 @@ async function main() {
         commandArgs = {};
         break;
       case 'send':
-        commandArgs = { text: args.text };
+        commandArgs = { text: args.text || args._positional };
         break;
       case 'receive':
         commandArgs = {};

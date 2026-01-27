@@ -33,14 +33,10 @@ function exitGracefully() {
   process.exit(0);
 }
 
-function isConnectionError(errMsg) {
-  return /Connection reset|Connection refused|read: Connection reset|write: EPIPE|ECONNREFUSED|ETIMEDOUT|kex_exchange_identification/.test(errMsg);
-}
-
 function executeSend(text) {
   return new Promise((resolve) => {
     if (!isAlive) {
-      return resolve('ERROR: Daemon shutting down\n');
+      return resolve({ output: 'ERROR: Daemon shutting down\n', connectionLost: false });
     }
 
     try {
@@ -48,16 +44,11 @@ function executeSend(text) {
         `npx hyperssh -s ${seed} -u ${user} -e "${text.replace(/"/g, '\\"')}"`,
         { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
       );
-      resolve(output);
+      resolve({ output, connectionLost: false });
     } catch (err) {
       const errMsg = err.message || '';
-
-      if (isConnectionError(errMsg)) {
-        resolve(`ERROR: Remote connection closed\n`);
-        exitGracefully();
-      } else {
-        resolve(`ERROR: ${errMsg}\n`);
-      }
+      const connectionLost = /read: Connection reset|write: EPIPE|ETIMEDOUT/.test(errMsg);
+      resolve({ output: `ERROR: ${errMsg}\n`, connectionLost });
     }
   });
 }
@@ -75,9 +66,12 @@ const server = net.createServer((socket) => {
     const msg = JSON.parse(line);
     if (msg.type === 'send') {
       executeSend(msg.text)
-        .then((output) => {
-          socket.write(JSON.stringify({ status: 'success', output }) + '\n');
+        .then((result) => {
+          socket.write(JSON.stringify({ status: 'success', output: result.output }) + '\n');
           socket.end();
+          if (result.connectionLost) {
+            setTimeout(exitGracefully, 100);
+          }
         })
         .catch((err) => {
           socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n');
