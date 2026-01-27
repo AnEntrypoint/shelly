@@ -10,8 +10,45 @@ Persistent SSH connections through background daemons. Each CLI call is atomic a
 
 **Usage:** `npx -y gxe@latest AnEntrypoint/shelly cli <command> [options]`
 
+## Shell Alias Setup
+
+To simplify commands, create a shell alias:
+
+```bash
+alias shelly='npx -y gxe@latest AnEntrypoint/shelly cli'
+```
+
+Add this to your `~/.bashrc`, `~/.zshrc`, or equivalent shell config file to persist across sessions.
+
+Once the alias is created, all commands become shorter:
+
+```bash
+shelly connect --seed myserver
+shelly send --text "ls -la"
+shelly status
+shelly disconnect
+```
+
+This saves tokens and reduces command length while maintaining full functionality.
+
 ## Quick Start
 
+With alias (recommended):
+```bash
+# Start persistent connection (spawns daemon)
+shelly connect --seed myserver
+
+# Send command (reuses daemon, auto-receives output)
+shelly send --text "ls -la"
+
+# Check status
+shelly status
+
+# Terminate daemon
+shelly disconnect
+```
+
+Without alias:
 ```bash
 # Start persistent connection (spawns daemon)
 npx -y gxe@latest AnEntrypoint/shelly cli connect --seed myserver
@@ -74,6 +111,17 @@ Terminate server daemon.
 
 Connect once, send multiple commands without repeating --seed:
 
+With alias:
+```bash
+shelly connect --seed work
+shelly send --text "pwd"
+shelly send --text "ls /var"
+shelly send --text "whoami"
+shelly status
+shelly disconnect
+```
+
+Without alias:
 ```bash
 npx -y gxe@latest AnEntrypoint/shelly cli connect --seed work
 npx -y gxe@latest AnEntrypoint/shelly cli send --text "pwd"
@@ -87,13 +135,13 @@ Active seed stored in `~/.shelly/current-seed`, automatically read by commands.
 
 ## Multi-Seed Sessions
 
-Run independent daemons simultaneously with different seeds:
+Run independent daemons simultaneously with different seeds (with alias):
 
 ```bash
-npx -y gxe@latest AnEntrypoint/shelly cli connect --seed api-prod
-npx -y gxe@latest AnEntrypoint/shelly cli connect --seed db-prod
-npx -y gxe@latest AnEntrypoint/shelly cli send --seed api-prod --text "curl /health"
-npx -y gxe@latest AnEntrypoint/shelly cli send --seed db-prod --text "SELECT 1"
+shelly connect --seed api-prod
+shelly connect --seed db-prod
+shelly send --seed api-prod --text "curl /health"
+shelly send --seed db-prod --text "SELECT 1"
 ```
 
 Each seed has isolated daemon, state, and connection.
