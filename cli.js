@@ -68,13 +68,11 @@ async function main() {
     process.exit(1);
   }
 
-  // For connect and serve, seed is required from CLI
   if ((cmd === 'connect' || cmd === 'serve') && !seed) {
     console.error('Error: --seed required for ' + cmd + ' command');
     process.exit(1);
   }
 
-  // For other commands, use provided seed or read from current-seed file
   if (!seed && cmd !== 'connect' && cmd !== 'serve') {
     seed = getCurrentSeed();
   }
@@ -113,12 +111,10 @@ async function main() {
 
     const result = await AtomicSkill.execute(seed, cmd, commandArgs);
 
-    // After successful connect or serve, set current seed
     if ((cmd === 'connect' || cmd === 'serve') && result.status === 'success') {
       setCurrentSeed(seed);
     }
 
-    // After successful disconnect or stop, clear current seed
     if ((cmd === 'disconnect' || cmd === 'stop') && result.status === 'success') {
       clearCurrentSeed();
     }
