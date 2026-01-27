@@ -44,3 +44,12 @@ Daemon detects remote SSH connection closure via execSync error pattern matching
 
 ## Health Checks After Reboot
 State files persist across reboot but daemon/server processes do not. Commands verify actual process health before executing: isDaemonHealthy() probes socket connection (not just file existence), isProcessAlive() verifies process via kill(pid, 0). Applied in send/status/disconnect/serve/stop before operations. When stale detected, state automatically cleared (ctx.connected=false, ctx.serving=false) and clear error returned directing user to reconnect. No manual cleanup needed. Reboot scenario: state file says connected=true but daemon dead, first status/send detects it immediately and clears state.
+
+## CLI Argument Parsing - Positional and Flag Arguments
+send command accepts both `send "command"` (positional) and `send --text "command"` (flag). parseArgs() tracks positional arguments separately from named flags. Both syntaxes are valid and resolve to same handler. Positional arg takes precedence if both provided.
+
+## Daemon Socket Response Before Exit
+Daemon must write socket response BEFORE calling exitGracefully(). If process.exit() called before socket.end() completes, client receives empty response causing "Invalid response:" error. Solution: executeSend() returns structured object {output, connectionLost}, exitGracefully() deferred to setTimeout after socket response sent. Critical for reliable IPC.
+
+## Daemon File Ownership
+Daemon only owns its own socket file ~/.shelly/daemon-{seed}.sock. Must never delete current-seed file (owned by CLI) even on exit. exitGracefully() cleans socket only, current-seed persists so user can reconnect with single `connect` command. Cross-ownership violations break session recovery.
