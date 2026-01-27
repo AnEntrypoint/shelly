@@ -1,12 +1,14 @@
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 const { userInfo } = require('os');
 
 const seed = process.argv[2];
 if (!seed) process.exit(1);
 
+const seedHex = crypto.createHash('sha256').update(seed).digest('hex');
 const socketPath = path.join(process.env.HOME, '.shelly', `daemon-${seed}.sock`);
 const dir = path.dirname(socketPath);
 
@@ -37,7 +39,7 @@ function executeSend(text) {
 
     try {
       const output = execSync(
-        `npx hyperssh -s ${seed} -u ${user} -e "${text.replace(/"/g, '\\"')}"`,
+        `npx hyperssh -s ${seedHex} -u ${user} -e "${text.replace(/"/g, '\\"')}"`,
         { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
       );
       resolve({ output, connectionLost: false });
