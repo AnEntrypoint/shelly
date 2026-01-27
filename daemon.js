@@ -26,10 +26,6 @@ function exitGracefully() {
   if (fs.existsSync(socketPath)) {
     try { fs.unlinkSync(socketPath); } catch (e) {}
   }
-  const seedFile = path.join(process.env.HOME, '.shelly', 'current-seed');
-  if (fs.existsSync(seedFile)) {
-    try { fs.unlinkSync(seedFile); } catch (e) {}
-  }
   process.exit(0);
 }
 
