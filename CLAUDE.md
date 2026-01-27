@@ -22,10 +22,10 @@ No cross-seed state sharing. Disconnect preserves state file. Can reconnect to s
 Seed IS the connection identifier and HyperSSH key. No separate parameters. User auto-derived from `os.userInfo().username`. Commands: `serve --seed <id> [--port <port>]` and `connect --seed <id>`. No --user or --hypersshSeed parameters needed.
 
 ## Process Spawning (serve command)
-serve spawns detached hypertele process via `spawn('npx', ['hypertele', ...], {stdio: 'ignore', detached: true})`. Process unref'd immediately. PID stored in state file for recovery. Process lifecycle NOT managed by parent - survives process exit. Stop command kills process group with SIGTERM via `process.kill(-pid)`.
+serve spawns detached hypertele-server process via `spawn('npx', ['hypertele-server', '-l', port, '--seed', seedHex, '--private'], {stdio: 'ignore', detached: true})`. Seed is SHA256 hash of user seed converted to hex (64 chars). Process unref'd immediately. PID stored in state file for recovery. Process lifecycle NOT managed by parent - survives process exit. Stop command kills process group with SIGTERM via `process.kill(-pid)`.
 
-## Hypertele Unix Socket
-hypertele creates unix socket at `/tmp/hypertele-{seed}.sock` for each server. Socket cleaned up on stop. Multiple seeds can serve simultaneously - each has isolated socket and process.
+## Hypertele Server Seed Format
+hypertele-server requires --seed parameter as 64-character hex string (32 bytes). Seed derived via `crypto.createHash('sha256').update(seed).digest().toString('hex')`. hyperdht validates exact byte length at startup - invalid format causes "seed must be crypto_sign_SEEDBYTES bytes long" error. Multiple seeds can serve simultaneously with isolated processes and no socket files.
 
 ## Port Allocation
 serve --port is optional. If not provided, auto-selects random port 9000-9999. Port must be available locally on 127.0.0.1. No validation before spawn - hypertele will fail if port in use. Server state persists in file even if spawn fails - must manually fix port conflict and retry. Response includes `connectWith` field showing the CLI command to connect to the server.
@@ -53,3 +53,6 @@ Daemon must write socket response BEFORE calling exitGracefully(). If process.ex
 
 ## Daemon File Ownership
 Daemon only owns its own socket file ~/.shelly/daemon-{seed}.sock. Must never delete current-seed file (owned by CLI) even on exit. exitGracefully() cleans socket only, current-seed persists so user can reconnect with single `connect` command. Cross-ownership violations break session recovery.
+
+## Status Command Health Check
+status command checks process health BEFORE returning response. If ctx.serverPid exists, validates via health.isProcessAlive(pid) (uses process.kill(pid, 0)). Updates ctx.serving state in-memory and persists to file. When server process dies externally, status immediately reports serving: false with warning and clears serverPid/serverPort state. This ensures state always reflects reality. Similar pattern for daemons: isDaemonHealthy() probes socket connection and returns boolean. Port argument from CLI parsed as integer via parseInt(args.port, 10) to ensure numeric comparison and storage.
