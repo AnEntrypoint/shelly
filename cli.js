@@ -82,6 +82,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (!seed || seed.trim().length === 0) {
+    console.error('Error: --seed cannot be empty');
+    process.exit(1);
+  }
+
   try {
     let commandArgs = {};
 
@@ -102,7 +107,12 @@ async function main() {
         commandArgs = {};
         break;
       case 'serve':
-        commandArgs = { port: args.port ? parseInt(args.port, 10) : null };
+        const port = args.port ? parseInt(args.port, 10) : null;
+        if (args.port && (isNaN(port) || port < 1 || port > 65535)) {
+          console.error('Error: --port must be a valid number between 1 and 65535');
+          process.exit(1);
+        }
+        commandArgs = { port };
         break;
       case 'stop':
         commandArgs = {};
@@ -115,7 +125,7 @@ async function main() {
       setCurrentSeed(seed);
     }
 
-    if ((cmd === 'disconnect' || cmd === 'stop') && result.status === 'success') {
+    if (cmd === 'disconnect' && result.status === 'success') {
       clearCurrentSeed();
     }
 
