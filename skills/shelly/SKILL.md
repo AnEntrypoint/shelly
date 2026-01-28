@@ -79,10 +79,10 @@ Execute command via daemon, returns output immediately.
 - Daemon handles actual execution via hyperssh
 
 ### receive
-Manually retrieve buffered output.
-- Empty if already consumed by send
-- Returns: `{status, data}`
-- Rare usage (send auto-receives)
+Manually retrieve buffered output (deprecated - send returns output immediately).
+- No buffering in current IPC architecture
+- Returns: `{status, message, data: ''}`
+- Rarely used (send auto-receives output)
 
 ### status
 Show connection and daemon status.
@@ -102,10 +102,10 @@ Start persistent server daemon.
 - Stores state in `~/.shelly/seeds/{SHA256(seed)}.json`
 
 ### stop
-Terminate server daemon.
-- Requires `--seed <id>` or active seed via `--seed`
-- Or uses current-seed if available
-- Cleans server socket
+Terminate server daemon (keeps daemon running if also connected).
+- Uses `--seed <id>` or active current-seed
+- Stops server process gracefully
+- Does NOT clear current-seed file (session remains intact)
 
 ## Session-Like Workflow
 
@@ -131,7 +131,7 @@ npx -y gxe@latest AnEntrypoint/shelly cli status
 npx -y gxe@latest AnEntrypoint/shelly cli disconnect
 ```
 
-Active seed stored in `~/.shelly/current-seed`, automatically read by commands.
+Active seed stored in `~/.shelly/current-seed`, automatically read by commands. Cleared only by `disconnect` command, not by `stop` (so server can be restarted without reconnecting daemon).
 
 ## Multi-Seed Sessions
 

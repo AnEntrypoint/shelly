@@ -45,7 +45,7 @@ function executeSend(text) {
       resolve({ output, connectionLost: false });
     } catch (err) {
       const errMsg = err.message || '';
-      const connectionLost = /read: Connection reset|write: EPIPE|ETIMEDOUT/.test(errMsg);
+      const connectionLost = /Connection reset|Connection refused|read: Connection reset|write: EPIPE|ECONNREFUSED|ETIMEDOUT|kex_exchange_identification/.test(errMsg);
       resolve({ output: `ERROR: ${errMsg}\n`, connectionLost });
     }
   });
@@ -61,24 +61,35 @@ const server = net.createServer((socket) => {
     const line = input.trim();
     input = '';
 
-    const msg = JSON.parse(line);
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch (err) {
+      socket.write(JSON.stringify({ status: 'error', error: 'Invalid JSON: ' + err.message }) + '\n');
+      socket.end();
+      return;
+    }
+
     if (msg.type === 'send') {
       executeSend(msg.text)
         .then((result) => {
-          socket.write(JSON.stringify({ status: 'success', output: result.output }) + '\n');
-          socket.end();
-          if (result.connectionLost) {
-            setTimeout(exitGracefully, 100);
-          }
+          socket.write(JSON.stringify({ status: 'success', output: result.output }) + '\n', () => {
+            socket.end();
+            if (result.connectionLost) {
+              setTimeout(exitGracefully, 0);
+            }
+          });
         })
         .catch((err) => {
-          socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n');
-          socket.end();
+          socket.write(JSON.stringify({ status: 'error', error: err.message }) + '\n', () => {
+            socket.end();
+          });
         });
     } else if (msg.type === 'disconnect') {
-      socket.write(JSON.stringify({ status: 'success' }) + '\n');
-      socket.end();
-      setTimeout(exitGracefully, 100);
+      socket.write(JSON.stringify({ status: 'success' }) + '\n', () => {
+        socket.end();
+        setTimeout(exitGracefully, 0);
+      });
     }
   });
 
@@ -87,7 +98,14 @@ const server = net.createServer((socket) => {
 });
 
 server.listen(socketPath, () => {});
+server.on('error', (err) => {
+  process.exit(1);
+});
 
-process.on('SIGTERM', exitGracefully);
+process.on('SIGTERM', () => {
+  setTimeout(exitGracefully, 500);
+});
 process.on('SIGHUP', () => {});
-process.on('SIGINT', exitGracefully);
+process.on('SIGINT', () => {
+  setTimeout(exitGracefully, 500);
+});

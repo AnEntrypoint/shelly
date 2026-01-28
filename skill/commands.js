@@ -1,5 +1,4 @@
 const server = require('../server');
-const proc = require('../process');
 const ipc = require('../ipc');
 const health = require('../health');
 const { userInfo } = require('os');
@@ -32,8 +31,7 @@ async function send(ctx, args) {
 
 function receive(ctx) {
   if (!ctx.connected) throw new Error('Not connected. Call connect first');
-  const data = proc.receive(ctx.seed);
-  return { status: 'success', message: 'Received', seed: ctx.seed, data };
+  return { status: 'success', message: 'No buffered output (send returns output immediately)', seed: ctx.seed, data: '' };
 }
 
 async function status(ctx) {
