@@ -55,7 +55,10 @@ function startDaemon(seed) {
   }
 
   if (fs.existsSync(socketPath)) {
-    fs.unlinkSync(socketPath);
+    try {
+      fs.unlinkSync(socketPath);
+    } catch (err) {
+    }
   }
 
   const daemon = spawn('node', [path.join(__dirname, 'daemon.js'), seed], {
